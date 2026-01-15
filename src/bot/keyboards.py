@@ -1,49 +1,48 @@
 """Keyboard layouts for the bot."""
 
-from aiogram.types import (
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton
-)
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
-def get_main_menu() -> ReplyKeyboardMarkup:
+def get_main_menu() -> InlineKeyboardMarkup:
     """Get main menu keyboard.
 
     Returns:
-        Main menu keyboard
+        Main menu inline keyboard
     """
-    keyboard = [
-        [KeyboardButton(text="📊 Проверить адрес")],
-        [KeyboardButton(text="➕ Добавить адрес"), KeyboardButton(text="📋 Мои адреса")],
-        [KeyboardButton(text="⚙️ Настройки")],
+    buttons = [
+        [InlineKeyboardButton(text="📊 Проверить адрес", callback_data="menu_check")],
+        [
+            InlineKeyboardButton(text="➕ Добавить адрес", callback_data="menu_add"),
+            InlineKeyboardButton(text="📋 Мои адреса", callback_data="menu_list")
+        ],
+        [InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu_settings")],
     ]
-    return ReplyKeyboardMarkup(
-        keyboard=keyboard,
-        resize_keyboard=True,
-        input_field_placeholder="Выберите действие..."
-    )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def get_back_keyboard(skip_button: bool = False) -> ReplyKeyboardMarkup:
-    """Get keyboard with back button.
-
-    Args:
-        skip_button: Whether to include skip button
+def get_cancel_keyboard() -> InlineKeyboardMarkup:
+    """Get keyboard with cancel button.
 
     Returns:
-        Keyboard with back button
+        Inline keyboard with cancel button
     """
-    keyboard = []
-    if skip_button:
-        keyboard.append([KeyboardButton(text="⏭️ Пропустить")])
-    keyboard.append([KeyboardButton(text="🔙 Назад")])
+    buttons = [
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-    return ReplyKeyboardMarkup(
-        keyboard=keyboard,
-        resize_keyboard=True
-    )
+
+def get_skip_keyboard() -> InlineKeyboardMarkup:
+    """Get keyboard with skip and cancel buttons.
+
+    Returns:
+        Inline keyboard with skip and cancel
+    """
+    buttons = [
+        [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="skip_nickname")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def get_tracked_addresses_keyboard(addresses: list) -> InlineKeyboardMarkup:

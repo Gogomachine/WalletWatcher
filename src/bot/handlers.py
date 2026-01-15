@@ -1,16 +1,19 @@
 """Bot command handlers."""
 
+import re
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.enums import ChatType
 from .keyboards import (
     get_main_menu,
     get_tracked_addresses_keyboard,
     get_address_actions_keyboard,
     get_notifications_keyboard,
-    get_back_keyboard
+    get_cancel_keyboard,
+    get_skip_keyboard
 )
 from ..solana.client import SolanaClient
 from ..database.db import Database
@@ -23,7 +26,6 @@ class AddressStates(StatesGroup):
     """States for address input."""
     waiting_for_address = State()
     waiting_for_nickname = State()
-    waiting_for_remove_address = State()
 
 
 # Глобальные переменные для клиентов (будут инициализированы в main.py)
@@ -46,30 +48,56 @@ def init_handlers(sol_client: SolanaClient, db: Database, addr_monitor):
     monitor = addr_monitor
 
 
+def is_solana_address(text: str) -> bool:
+    """Check if text looks like a Solana address.
+
+    Args:
+        text: Text to check
+
+    Returns:
+        True if looks like Solana address
+    """
+    if not text:
+        return False
+    # Solana addresses are base58 encoded, 32-44 characters
+    return bool(re.match(r'^[1-9A-HJ-NP-Za-km-z]{32,44}$', text.strip()))
+
+
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     """Handle /start command."""
-    await message.answer(
-        f"👋 Привет, {message.from_user.first_name}!\n\n"
-        f"Я бот для отслеживания Solana адресов.\n\n"
-        f"Я могу:\n"
-        f"• Показать информацию о любом адресе\n"
-        f"• Отслеживать адреса в реальном времени\n"
-        f"• Уведомлять о новых транзакциях\n\n"
-        f"Используйте меню ниже для навигации:",
-        reply_markup=get_main_menu()
-    )
+    # Если в группе, отвечаем кратко
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        await message.reply(
+            "👋 Привет! Я бот для отслеживания Solana адресов.\n\n"
+            "Отправьте адрес или используйте /menu для просмотра команд."
+        )
+    else:
+        await message.answer(
+            f"👋 Привет, {message.from_user.first_name}!\n\n"
+            f"Я бот для отслеживания Solana адресов.\n\n"
+            f"Я могу:\n"
+            f"• Показать информацию о любом адресе\n"
+            f"• Отслеживать адреса в реальном времени\n"
+            f"• Уведомлять о новых транзакциях\n\n"
+            f"Используйте меню ниже для навигации:",
+            reply_markup=get_main_menu()
+        )
 
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
     """Handle /help command."""
-    await message.answer(
+    await message.reply(
         "📖 <b>Справка</b>\n\n"
         "<b>Основные команды:</b>\n"
         "/start - Начать работу с ботом\n"
         "/help - Показать эту справку\n"
-        "/menu - Показать главное меню\n\n"
+        "/menu - Показать главное меню\n"
+        "/check <адрес> - Проверить адрес\n"
+        "/track <адрес> - Добавить адрес в отслеживание\n"
+        "/list - Мои отслеживаемые адреса\n"
+        "/settings - Настройки\n\n"
         "<b>Получение информации:</b>\n"
         "Просто отправьте Solana адрес, и я покажу всю информацию о нём:\n"
         "• Баланс в SOL\n"
@@ -78,79 +106,204 @@ async def cmd_help(message: Message):
         "• Является ли адрес биржевым\n\n"
         "<b>Отслеживание:</b>\n"
         "Добавьте адрес в список отслеживания, и вы будете получать уведомления "
-        "о каждой новой транзакции в режиме реального времени.",
-        reply_markup=get_back_keyboard()
+        "о каждой новой транзакции в режиме реального времени."
     )
 
 
 @router.message(Command("menu"))
 async def cmd_menu(message: Message):
     """Handle /menu command."""
-    await message.answer(
+    await message.reply(
         "📱 Главное меню:",
         reply_markup=get_main_menu()
     )
 
 
-@router.message(F.text == "📊 Проверить адрес")
-async def check_address_request(message: Message, state: FSMContext):
-    """Request address to check."""
-    await state.set_state(AddressStates.waiting_for_address)
-    await message.answer(
-        "📍 Отправьте Solana адрес для проверки:\n\n"
-        "Пример: 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-        reply_markup=get_back_keyboard()
+@router.message(Command("check"))
+async def cmd_check(message: Message):
+    """Handle /check command with address."""
+    # Извлекаем адрес из команды
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.reply(
+            "📍 Отправьте адрес после команды:\n"
+            "<code>/check 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    address = parts[1].strip()
+    await check_address(message, address)
+
+
+@router.message(Command("track"))
+async def cmd_track(message: Message):
+    """Handle /track command to add address to tracking."""
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.reply(
+            "📍 Отправьте адрес после команды:\n"
+            "<code>/track 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    address = parts[1].strip()
+
+    # Проверяем валидность
+    if not is_solana_address(address):
+        await message.reply("❌ Неверный формат адреса Solana")
+        return
+
+    # Добавляем в отслеживание
+    success = await database.add_tracked_address(
+        message.from_user.id,
+        address,
+        None
     )
 
-
-@router.message(F.text == "➕ Добавить адрес")
-async def add_address_request(message: Message, state: FSMContext):
-    """Request address to add to tracking."""
-    await state.set_state(AddressStates.waiting_for_address)
-    await state.update_data(adding_to_tracking=True)
-    await message.answer(
-        "📍 Отправьте Solana адрес для отслеживания:\n\n"
-        "Пример: 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-        reply_markup=get_back_keyboard()
-    )
+    if success:
+        await message.reply(
+            f"✅ Адрес добавлен в отслеживание!\n\n"
+            f"<code>{address}</code>\n\n"
+            f"Вы будете получать уведомления о новых транзакциях.",
+            parse_mode="HTML"
+        )
+    else:
+        await message.reply("❌ Этот адрес уже отслеживается.")
 
 
-@router.message(F.text == "📋 Мои адреса")
-async def show_tracked_addresses(message: Message):
-    """Show user's tracked addresses."""
+@router.message(Command("list"))
+async def cmd_list(message: Message):
+    """Handle /list command to show tracked addresses."""
     addresses = await database.get_user_tracked_addresses(message.from_user.id)
 
     if not addresses:
-        await message.answer(
+        await message.reply(
             "У вас пока нет отслеживаемых адресов.\n\n"
-            "Используйте кнопку '➕ Добавить адрес' для добавления.",
-            reply_markup=get_main_menu()
+            "Используйте /track <адрес> для добавления."
         )
         return
 
     keyboard = get_tracked_addresses_keyboard(addresses)
-    await message.answer(
+    await message.reply(
         f"📋 <b>Ваши отслеживаемые адреса ({len(addresses)}):</b>\n\n"
         "Нажмите на адрес для управления:",
-        reply_markup=keyboard
+        reply_markup=keyboard,
+        parse_mode="HTML"
     )
 
 
-@router.message(F.text == "⚙️ Настройки")
-async def show_settings(message: Message):
-    """Show user settings."""
-    settings = await database.get_user_settings(message.from_user.id)
-    count = await database.get_tracked_address_count(message.from_user.id)
+@router.message(Command("settings"))
+async def cmd_settings(message: Message):
+    """Handle /settings command."""
+    await show_settings(message)
 
-    notifications_status = "Включены ✅" if settings['notifications_enabled'] else "Выключены ❌"
 
-    await message.answer(
-        f"⚙️ <b>Настройки</b>\n\n"
-        f"👤 <b>Пользователь:</b> {message.from_user.first_name}\n"
-        f"📋 <b>Отслеживаемых адресов:</b> {count}\n"
-        f"🔔 <b>Уведомления:</b> {notifications_status}\n",
-        reply_markup=get_notifications_keyboard(settings['notifications_enabled'])
+# Callback handlers для inline кнопок
+
+
+@router.callback_query(F.data == "menu_check")
+async def menu_check_callback(callback: CallbackQuery, state: FSMContext):
+    """Handle 'Check address' menu button."""
+    await state.set_state(AddressStates.waiting_for_address)
+    await callback.message.edit_text(
+        "📍 Отправьте Solana адрес для проверки:\n\n"
+        "Пример: <code>7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU</code>",
+        reply_markup=get_cancel_keyboard(),
+        parse_mode="HTML"
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu_add")
+async def menu_add_callback(callback: CallbackQuery, state: FSMContext):
+    """Handle 'Add address' menu button."""
+    await state.set_state(AddressStates.waiting_for_address)
+    await state.update_data(adding_to_tracking=True)
+    await callback.message.edit_text(
+        "📍 Отправьте Solana адрес для отслеживания:\n\n"
+        "Пример: <code>7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU</code>",
+        reply_markup=get_cancel_keyboard(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu_list")
+async def menu_list_callback(callback: CallbackQuery):
+    """Handle 'My addresses' menu button."""
+    addresses = await database.get_user_tracked_addresses(callback.from_user.id)
+
+    if not addresses:
+        await callback.message.edit_text(
+            "У вас пока нет отслеживаемых адресов.\n\n"
+            "Используйте меню для добавления.",
+            reply_markup=get_main_menu()
+        )
+        await callback.answer()
+        return
+
+    keyboard = get_tracked_addresses_keyboard(addresses)
+    await callback.message.edit_text(
+        f"📋 <b>Ваши отслеживаемые адреса ({len(addresses)}):</b>\n\n"
+        "Нажмите на адрес для управления:",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu_settings")
+async def menu_settings_callback(callback: CallbackQuery):
+    """Handle 'Settings' menu button."""
+    await show_settings_callback(callback)
+
+
+@router.callback_query(F.data == "cancel")
+async def cancel_callback(callback: CallbackQuery, state: FSMContext):
+    """Handle cancel button."""
+    await state.clear()
+    await callback.message.edit_text(
+        "❌ Отменено.\n\nИспользуйте меню ниже:",
+        reply_markup=get_main_menu()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "skip_nickname")
+async def skip_nickname_callback(callback: CallbackQuery, state: FSMContext):
+    """Handle skip nickname button."""
+    data = await state.get_data()
+    address = data.get('address')
+
+    if not address:
+        await callback.answer("Ошибка: адрес не найден", show_alert=True)
+        return
+
+    # Добавляем без никнейма
+    success = await database.add_tracked_address(
+        callback.from_user.id,
+        address,
+        None
+    )
+
+    if success:
+        await callback.message.edit_text(
+            f"✅ Адрес успешно добавлен в отслеживание!\n\n"
+            f"<code>{address}</code>\n\n"
+            f"Вы будете получать уведомления о новых транзакциях.",
+            parse_mode="HTML",
+            reply_markup=get_main_menu()
+        )
+    else:
+        await callback.message.edit_text(
+            "❌ Этот адрес уже отслеживается.",
+            reply_markup=get_main_menu()
+        )
+
+    await state.clear()
+    await callback.answer()
 
 
 @router.message(StateFilter(AddressStates.waiting_for_address))
@@ -158,16 +311,22 @@ async def process_address(message: Message, state: FSMContext):
     """Process received address."""
     address = message.text.strip()
 
-    # Проверка валидности адреса и получение информации
-    await message.answer("⏳ Получаю информацию...")
+    # Проверка валидности адреса
+    if not is_solana_address(address):
+        await message.reply(
+            "❌ Неверный формат адреса Solana.\n\n"
+            "Адрес должен быть в формате base58 и содержать 32-44 символа."
+        )
+        return
+
+    await message.reply("⏳ Получаю информацию...")
 
     info = await solana_client.get_wallet_info(address)
 
     if "error" in info:
-        await message.answer(
+        await message.reply(
             f"❌ Ошибка: {info['error']}\n\n"
-            "Убедитесь, что вы отправили корректный Solana адрес.",
-            reply_markup=get_main_menu()
+            "Убедитесь, что вы отправили корректный Solana адрес."
         )
         await state.clear()
         return
@@ -181,14 +340,14 @@ async def process_address(message: Message, state: FSMContext):
         # Сохраняем адрес и спрашиваем никнейм
         await state.update_data(address=address)
         await state.set_state(AddressStates.waiting_for_nickname)
-        await message.answer(msg, disable_web_page_preview=True)
-        await message.answer(
+        await message.reply(msg, disable_web_page_preview=True, parse_mode="HTML")
+        await message.reply(
             "✏️ Хотите задать никнейм для этого адреса?\n\n"
             "Отправьте никнейм или нажмите 'Пропустить':",
-            reply_markup=get_back_keyboard(skip_button=True)
+            reply_markup=get_skip_keyboard()
         )
     else:
-        await message.answer(msg, reply_markup=get_main_menu(), disable_web_page_preview=True)
+        await message.reply(msg, disable_web_page_preview=True, parse_mode="HTML")
         await state.clear()
 
 
@@ -197,8 +356,7 @@ async def process_nickname(message: Message, state: FSMContext):
     """Process nickname for tracked address."""
     data = await state.get_data()
     address = data['address']
-
-    nickname = None if message.text == "⏭️ Пропустить" else message.text.strip()
+    nickname = message.text.strip()
 
     # Добавляем адрес в отслеживание
     success = await database.add_tracked_address(
@@ -208,19 +366,55 @@ async def process_nickname(message: Message, state: FSMContext):
     )
 
     if success:
-        await message.answer(
+        await message.reply(
             f"✅ Адрес успешно добавлен в отслеживание!\n\n"
-            f"{'🏷️ Никнейм: ' + nickname if nickname else ''}\n"
-            f"Вы будете получать уведомления о новых транзакциях.",
-            reply_markup=get_main_menu()
+            f"🏷️ Никнейм: {nickname}\n"
+            f"Вы будете получать уведомления о новых транзакциях."
         )
     else:
-        await message.answer(
-            "❌ Этот адрес уже отслеживается.",
-            reply_markup=get_main_menu()
-        )
+        await message.reply("❌ Этот адрес уже отслеживается.")
 
     await state.clear()
+
+
+# Автоматическая проверка адресов в сообщениях
+
+
+@router.message(F.text)
+async def handle_text_message(message: Message, state: FSMContext):
+    """Handle text messages - check if it's a Solana address."""
+    # Если мы в состоянии ожидания, пропускаем
+    current_state = await state.get_state()
+    if current_state:
+        return
+
+    text = message.text.strip()
+
+    # Проверяем, является ли текст адресом Solana
+    if is_solana_address(text):
+        await check_address(message, text)
+
+
+async def check_address(message: Message, address: str):
+    """Check and display address information.
+
+    Args:
+        message: Message object
+        address: Solana address
+    """
+    await message.reply("⏳ Получаю информацию...")
+
+    info = await solana_client.get_wallet_info(address)
+
+    if "error" in info:
+        await message.reply(f"❌ Ошибка: {info['error']}")
+        return
+
+    msg = format_wallet_info(info)
+    await message.reply(msg, disable_web_page_preview=True, parse_mode="HTML")
+
+
+# Address management callbacks
 
 
 @router.callback_query(F.data.startswith("addr_"))
@@ -231,7 +425,8 @@ async def show_address_actions(callback: CallbackQuery):
     await callback.message.edit_text(
         f"🔍 <b>Адрес:</b> <code>{address}</code>\n\n"
         "Выберите действие:",
-        reply_markup=get_address_actions_keyboard(address)
+        reply_markup=get_address_actions_keyboard(address),
+        parse_mode="HTML"
     )
     await callback.answer()
 
@@ -246,11 +441,10 @@ async def remove_address(callback: CallbackQuery):
     if success:
         await callback.message.edit_text(
             f"✅ Адрес удален из отслеживания:\n<code>{address}</code>",
+            parse_mode="HTML"
         )
     else:
-        await callback.message.edit_text(
-            "❌ Ошибка при удалении адреса."
-        )
+        await callback.message.edit_text("❌ Ошибка при удалении адреса.")
 
     await callback.answer()
 
@@ -265,7 +459,7 @@ async def check_address_callback(callback: CallbackQuery):
     info = await solana_client.get_wallet_info(address)
     msg = format_wallet_info(info)
 
-    await callback.message.edit_text(msg, disable_web_page_preview=True)
+    await callback.message.edit_text(msg, disable_web_page_preview=True, parse_mode="HTML")
     await callback.answer()
 
 
@@ -281,16 +475,7 @@ async def toggle_notifications(callback: CallbackQuery):
     await callback.answer(f"Уведомления {status}")
 
     # Update message
-    count = await database.get_tracked_address_count(callback.from_user.id)
-    notifications_status = "Включены ✅" if new_state else "Выключены ❌"
-
-    await callback.message.edit_text(
-        f"⚙️ <b>Настройки</b>\n\n"
-        f"👤 <b>Пользователь:</b> {callback.from_user.first_name}\n"
-        f"📋 <b>Отслеживаемых адресов:</b> {count}\n"
-        f"🔔 <b>Уведомления:</b> {notifications_status}\n",
-        reply_markup=get_notifications_keyboard(new_state)
-    )
+    await show_settings_callback(callback)
 
 
 @router.callback_query(F.data == "back_to_list")
@@ -302,25 +487,52 @@ async def back_to_list(callback: CallbackQuery):
     await callback.message.edit_text(
         f"📋 <b>Ваши отслеживаемые адреса ({len(addresses)}):</b>\n\n"
         "Нажмите на адрес для управления:",
-        reply_markup=keyboard
+        reply_markup=keyboard,
+        parse_mode="HTML"
     )
     await callback.answer()
 
 
-@router.message(F.text == "🔙 Назад")
-async def back_to_menu(message: Message, state: FSMContext):
-    """Return to main menu."""
-    await state.clear()
-    await message.answer(
-        "📱 Главное меню:",
-        reply_markup=get_main_menu()
+async def show_settings(message: Message):
+    """Show user settings.
+
+    Args:
+        message: Message object
+    """
+    settings = await database.get_user_settings(message.from_user.id)
+    count = await database.get_tracked_address_count(message.from_user.id)
+
+    notifications_status = "Включены ✅" if settings['notifications_enabled'] else "Выключены ❌"
+
+    await message.reply(
+        f"⚙️ <b>Настройки</b>\n\n"
+        f"👤 <b>Пользователь:</b> {message.from_user.first_name}\n"
+        f"📋 <b>Отслеживаемых адресов:</b> {count}\n"
+        f"🔔 <b>Уведомления:</b> {notifications_status}\n",
+        reply_markup=get_notifications_keyboard(settings['notifications_enabled']),
+        parse_mode="HTML"
     )
 
 
-@router.message(F.text == "⏭️ Пропустить")
-async def skip_nickname(message: Message, state: FSMContext):
-    """Skip nickname input."""
-    await process_nickname(message, state)
+async def show_settings_callback(callback: CallbackQuery):
+    """Show user settings via callback.
+
+    Args:
+        callback: CallbackQuery object
+    """
+    settings = await database.get_user_settings(callback.from_user.id)
+    count = await database.get_tracked_address_count(callback.from_user.id)
+
+    notifications_status = "Включены ✅" if settings['notifications_enabled'] else "Выключены ❌"
+
+    await callback.message.edit_text(
+        f"⚙️ <b>Настройки</b>\n\n"
+        f"👤 <b>Пользователь:</b> {callback.from_user.first_name}\n"
+        f"📋 <b>Отслеживаемых адресов:</b> {count}\n"
+        f"🔔 <b>Уведомления:</b> {notifications_status}\n",
+        reply_markup=get_notifications_keyboard(settings['notifications_enabled']),
+        parse_mode="HTML"
+    )
 
 
 def format_wallet_info(info: dict) -> str:
