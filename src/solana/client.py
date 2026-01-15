@@ -179,18 +179,34 @@ class SolanaClient:
         if not first_tx or not first_tx["timestamp"]:
             return None
 
-        age = datetime.now() - first_tx["timestamp"]
-        years = age.days // 365
-        months = (age.days % 365) // 30
-        days = (age.days % 365) % 30
+        # Calculate age from first transaction to now
+        first_tx_date = first_tx["timestamp"]
+        current_date = datetime.now()
+        age = current_date - first_tx_date
+
+        # Calculate years, months, days
+        total_days = age.days
+        years = total_days // 365
+        remaining_days = total_days % 365
+        months = remaining_days // 30
+        days = remaining_days % 30
+
+        # Format age string
+        age_parts = []
+        if years > 0:
+            age_parts.append(f"{years}г")
+        if months > 0:
+            age_parts.append(f"{months}м")
+        if days > 0 or not age_parts:  # Show days if it's the only value or if there are other parts
+            age_parts.append(f"{days}д")
 
         return {
-            "first_transaction": first_tx["timestamp"],
-            "total_days": age.days,
+            "first_transaction_date": first_tx_date,
+            "total_days": total_days,
             "years": years,
             "months": months,
             "days": days,
-            "formatted": f"{years}y {months}m {days}d" if years > 0 else f"{months}m {days}d"
+            "formatted": " ".join(age_parts)
         }
 
     async def get_wallet_info(self, address: str) -> Dict:
@@ -209,11 +225,10 @@ class SolanaClient:
             return {"error": "Invalid Solana address"}
 
         # Get all info in parallel
-        balance, wallet_age, last_tx, first_tx = await asyncio.gather(
+        balance, wallet_age, last_tx = await asyncio.gather(
             self.get_balance(address),
             self.get_wallet_age(address),
             self.get_last_transaction(address),
-            self.get_first_transaction(address),
             return_exceptions=True
         )
 
@@ -225,7 +240,7 @@ class SolanaClient:
             "is_exchange": exchange is not None,
             "exchange_name": exchange,
             "balance": balance,
+            "max_balance": None,  # TODO: Requires historical data from external API (Helius/Solscan)
             "wallet_age": wallet_age,
-            "first_transaction": first_tx,
             "last_transaction": last_tx,
         }

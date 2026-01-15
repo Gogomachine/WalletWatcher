@@ -549,37 +549,47 @@ def format_wallet_info(info: dict) -> str:
 
     address = info['address']
     balance = info.get('balance')
+    max_balance = info.get('max_balance')
     wallet_age = info.get('wallet_age')
     last_tx = info.get('last_transaction')
     is_exchange = info.get('is_exchange')
     exchange_name = info.get('exchange_name')
 
+    # Create explorer URL for address
+    address_explorer_url = f"https://solscan.io/account/{address}"
+
     msg = f"📊 <b>Информация об адресе</b>\n\n"
-    msg += f"📍 <b>Адрес:</b> <code>{address}</code>\n\n"
+    msg += f"📍 <a href='{address_explorer_url}'><b>{address[:8]}...{address[-6:]}</b></a>\n\n"
 
     # Exchange status
     if is_exchange:
-        msg += f"🏦 <b>Биржевой адрес:</b> {exchange_name} ✅\n\n"
-    else:
-        msg += f"🏦 <b>Биржевой адрес:</b> Нет\n\n"
+        msg += f"🏦 <b>Биржа:</b> {exchange_name} ✅\n\n"
 
-    # Balance
+    # Balance - Total Value (текущий баланс)
     if balance is not None:
-        msg += f"💰 <b>Баланс:</b> {balance:.4f} SOL\n\n"
-    else:
-        msg += f"💰 <b>Баланс:</b> Недоступен\n\n"
+        msg += f"💰 <b>Total Value:</b> {balance:.4f} SOL\n"
 
-    # Wallet age
+        # Максимальный баланс (если доступен)
+        if max_balance is not None and max_balance > balance:
+            msg += f"📈 <b>Max Balance:</b> {max_balance:.4f} SOL\n"
+
+        msg += "\n"
+    else:
+        msg += f"💰 <b>Total Value:</b> Недоступен\n\n"
+
+    # Wallet age (возраст кошелька)
     if wallet_age:
         msg += f"🗓️ <b>Возраст кошелька:</b> {wallet_age['formatted']}\n"
-        msg += f"📅 <b>Первая транзакция:</b> {wallet_age['first_transaction'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        if wallet_age.get('first_transaction_date'):
+            first_date = wallet_age['first_transaction_date'].strftime('%d.%m.%Y')
+            msg += f"📅 <b>С:</b> {first_date}\n\n"
     else:
         msg += f"🗓️ <b>Возраст кошелька:</b> Нет транзакций\n\n"
 
     # Last transaction
-    if last_tx:
+    if last_tx and last_tx.get('timestamp'):
         msg += f"🔄 <b>Последняя транзакция:</b>\n"
-        msg += f"⏰ {last_tx['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}\n"
+        msg += f"⏰ {last_tx['timestamp'].strftime('%d.%m.%Y %H:%M:%S')}\n"
         msg += f"🔗 <a href='{last_tx['explorer_url']}'>Посмотреть в эксплорере</a>\n"
 
     return msg
