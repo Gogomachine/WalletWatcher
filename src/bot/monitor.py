@@ -1,0 +1,188 @@
+"""Address monitoring system for real-time transaction notifications."""
+
+import asyncio
+from datetime import datetime
+from typing import Callable
+from ..solana.client import SolanaClient
+from ..database.db import Database
+
+
+class AddressMonitor:
+    """Monitor Solana addresses for new transactions."""
+
+    def __init__(
+        self,
+        solana_client: SolanaClient,
+        database: Database,
+        notification_callback: Callable,
+        interval: int = 10
+    ):
+        """Initialize address monitor.
+
+        Args:
+            solana_client: Solana blockchain client
+            database: Database instance
+            notification_callback: Async function to call when new transaction detected
+            interval: Monitoring interval in seconds
+        """
+        self.solana_client = solana_client
+        self.database = database
+        self.notification_callback = notification_callback
+        self.interval = interval
+        self.running = False
+        self._task = None
+
+    async def start(self):
+        """Start monitoring addresses."""
+        if self.running:
+            return
+
+        self.running = True
+        self._task = asyncio.create_task(self._monitor_loop())
+        print(f"Address monitor started (interval: {self.interval}s)")
+
+    async def stop(self):
+        """Stop monitoring addresses."""
+        self.running = False
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        print("Address monitor stopped")
+
+    async def _monitor_loop(self):
+        """Main monitoring loop."""
+        while self.running:
+            try:
+                await self._check_all_addresses()
+            except Exception as e:
+                print(f"Error in monitor loop: {e}")
+
+            # Wait for next iteration
+            await asyncio.sleep(self.interval)
+
+    async def _check_all_addresses(self):
+        """Check all tracked addresses for new transactions."""
+        # Get all tracked addresses
+        tracked = await self.database.get_all_tracked_addresses()
+
+        if not tracked:
+            return
+
+        # Check each address
+        for record in tracked:
+            try:
+                await self._check_address(record)
+            except Exception as e:
+                print(f"Error checking address {record['address']}: {e}")
+
+    async def _check_address(self, record: dict):
+        """Check a single address for new transactions.
+
+        Args:
+            record: Database record with address info
+        """
+        address = record['address']
+        last_known_sig = record['last_signature']
+
+        # Get latest transaction
+        last_tx = await self.solana_client.get_last_transaction(address)
+
+        if not last_tx:
+            return
+
+        current_sig = last_tx['signature']
+
+        # If this is first check, just store signature
+        if not last_known_sig:
+            await self.database.update_last_signature(record['id'], current_sig)
+            return
+
+        # Check if there's a new transaction
+        if current_sig != last_known_sig:
+            # Get all new transactions
+            signatures = await self.solana_client.get_transaction_signatures(
+                address,
+                limit=100
+            )
+
+            # Find new transactions (those after last_known_sig)
+            new_transactions = []
+            for sig in signatures:
+                if sig['signature'] == last_known_sig:
+                    break
+                new_transactions.append(sig)
+
+            # Update last known signature
+            await self.database.update_last_signature(record['id'], current_sig)
+
+            # Send notifications for new transactions (in reverse order - oldest first)
+            for tx in reversed(new_transactions):
+                await self._send_notification(record, tx)
+
+    async def _send_notification(self, record: dict, transaction: dict):
+        """Send notification about new transaction.
+
+        Args:
+            record: Database record with address info
+            transaction: Transaction data
+        """
+        user_id = record['user_id']
+        address = record['address']
+        nickname = record['nickname']
+
+        # Check if user has notifications enabled
+        settings = await self.database.get_user_settings(user_id)
+        if not settings.get('notifications_enabled', 1):
+            return
+
+        # Format transaction time
+        tx_time = datetime.fromtimestamp(transaction['block_time']) if transaction['block_time'] else None
+        time_str = tx_time.strftime('%Y-%m-%d %H:%M:%S') if tx_time else 'Unknown'
+
+        # Create explorer URL
+        explorer_url = f"https://solscan.io/tx/{transaction['signature']}"
+
+        # Format message
+        message = (
+            f"🔔 <b>Новая транзакция!</b>\n\n"
+            f"📍 <b>Адрес:</b> {nickname or address[:8] + '...'}\n"
+            f"🔗 <code>{address}</code>\n\n"
+            f"⏰ <b>Время:</b> {time_str}\n"
+            f"🔍 <b>Signature:</b> <code>{transaction['signature'][:16]}...</code>\n\n"
+            f"<a href='{explorer_url}'>Посмотреть в эксплорере</a>"
+        )
+
+        # Call notification callback
+        try:
+            await self.notification_callback(user_id, message)
+        except Exception as e:
+            print(f"Error sending notification to user {user_id}: {e}")
+
+    async def check_address_now(self, user_id: int, address: str) -> bool:
+        """Manually check an address for new transactions.
+
+        Args:
+            user_id: Telegram user ID
+            address: Solana address to check
+
+        Returns:
+            True if check was successful
+        """
+        try:
+            tracked = await self.database.get_all_tracked_addresses()
+            record = next(
+                (r for r in tracked if r['user_id'] == user_id and r['address'] == address),
+                None
+            )
+
+            if not record:
+                return False
+
+            await self._check_address(record)
+            return True
+        except Exception as e:
+            print(f"Error in manual check: {e}")
+            return False
