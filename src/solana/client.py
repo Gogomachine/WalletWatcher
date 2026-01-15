@@ -240,7 +240,6 @@ class SolanaClient:
             "is_exchange": exchange is not None,
             "exchange_name": exchange,
             "balance": balance,
-            "max_balance": None,  # TODO: Requires historical data from external API (Helius/Solscan)
             "wallet_age": wallet_age,
             "last_transaction": last_tx,
         }

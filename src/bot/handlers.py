@@ -549,7 +549,6 @@ def format_wallet_info(info: dict) -> str:
 
     address = info['address']
     balance = info.get('balance')
-    max_balance = info.get('max_balance')
     wallet_age = info.get('wallet_age')
     last_tx = info.get('last_transaction')
     is_exchange = info.get('is_exchange')
@@ -567,13 +566,7 @@ def format_wallet_info(info: dict) -> str:
 
     # Balance - Total Value (текущий баланс)
     if balance is not None:
-        msg += f"💰 <b>Total Value:</b> {balance:.4f} SOL\n"
-
-        # Максимальный баланс (если доступен)
-        if max_balance is not None and max_balance > balance:
-            msg += f"📈 <b>Max Balance:</b> {max_balance:.4f} SOL\n"
-
-        msg += "\n"
+        msg += f"💰 <b>Total Value:</b> {balance:.4f} SOL\n\n"
     else:
         msg += f"💰 <b>Total Value:</b> Недоступен\n\n"
 
