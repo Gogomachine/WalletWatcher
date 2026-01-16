@@ -15,7 +15,7 @@ from .keyboards import (
     get_cancel_keyboard,
     get_skip_keyboard
 )
-from ..solana.client import SolanaClient
+from ..blockchain.universal_client import UniversalBlockchainClient, detect_address_type
 from ..database.db import Database
 
 
@@ -29,38 +29,39 @@ class AddressStates(StatesGroup):
 
 
 # Глобальные переменные для клиентов (будут инициализированы в main.py)
-solana_client: SolanaClient = None
+blockchain_client: UniversalBlockchainClient = None
 database: Database = None
 monitor = None
 
 
-def init_handlers(sol_client: SolanaClient, db: Database, addr_monitor):
+def init_handlers(bl_client: UniversalBlockchainClient, db: Database, addr_monitor):
     """Initialize handlers with dependencies.
 
     Args:
-        sol_client: Solana client instance
+        bl_client: Universal blockchain client instance
         db: Database instance
         addr_monitor: Address monitor instance
     """
-    global solana_client, database, monitor
-    solana_client = sol_client
+    global blockchain_client, database, monitor
+    blockchain_client = bl_client
     database = db
     monitor = addr_monitor
 
 
-def is_solana_address(text: str) -> bool:
-    """Check if text looks like a Solana address.
+def is_blockchain_address(text: str) -> bool:
+    """Check if text looks like a blockchain address (Solana or EVM).
 
     Args:
         text: Text to check
 
     Returns:
-        True if looks like Solana address
+        True if looks like a valid blockchain address
     """
     if not text:
         return False
-    # Solana addresses are base58 encoded, 32-44 characters
-    return bool(re.match(r'^[1-9A-HJ-NP-Za-km-z]{32,44}$', text.strip()))
+
+    address_type = detect_address_type(text.strip())
+    return address_type in ["solana", "evm"]
 
 
 @router.message(Command("start"))
@@ -151,7 +152,7 @@ async def cmd_track(message: Message):
     address = parts[1].strip()
 
     # Проверяем валидность
-    if not is_solana_address(address):
+    if not is_blockchain_address(address):
         await message.reply("❌ Неверный формат адреса Solana")
         return
 
@@ -312,7 +313,7 @@ async def process_address(message: Message, state: FSMContext):
     address = message.text.strip()
 
     # Проверка валидности адреса
-    if not is_solana_address(address):
+    if not is_blockchain_address(address):
         await message.reply(
             "❌ Неверный формат адреса Solana.\n\n"
             "Адрес должен быть в формате base58 и содержать 32-44 символа."
@@ -321,7 +322,7 @@ async def process_address(message: Message, state: FSMContext):
 
     await message.reply("⏳ Получаю информацию...")
 
-    info = await solana_client.get_wallet_info(address)
+    info = await blockchain_client.get_wallet_info(address)
 
     if "error" in info:
         await message.reply(
@@ -391,7 +392,7 @@ async def handle_text_message(message: Message, state: FSMContext):
     text = message.text.strip()
 
     # Проверяем, является ли текст адресом Solana
-    if is_solana_address(text):
+    if is_blockchain_address(text):
         await check_address(message, text)
 
 
@@ -404,7 +405,7 @@ async def check_address(message: Message, address: str):
     """
     await message.reply("⏳ Получаю информацию...")
 
-    info = await solana_client.get_wallet_info(address)
+    info = await blockchain_client.get_wallet_info(address)
 
     if "error" in info:
         await message.reply(f"❌ Ошибка: {info['error']}")
@@ -456,7 +457,7 @@ async def check_address_callback(callback: CallbackQuery):
 
     await callback.message.edit_text("⏳ Получаю информацию...")
 
-    info = await solana_client.get_wallet_info(address)
+    info = await blockchain_client.get_wallet_info(address)
     msg = format_wallet_info(info)
 
     await callback.message.edit_text(msg, disable_web_page_preview=True, parse_mode="HTML")
@@ -554,10 +555,23 @@ def format_wallet_info(info: dict) -> str:
     is_exchange = info.get('is_exchange')
     exchange_name = info.get('exchange_name')
 
+    # Get network info
+    network_name = info.get('network_name', 'Unknown')
+    symbol = info.get('symbol', '')
+    explorer_base = info.get('explorer', 'https://solscan.io')
+
     # Create explorer URL for address
-    address_explorer_url = f"https://solscan.io/account/{address}"
+    if info.get('network_type') == 'evm':
+        address_explorer_url = f"{explorer_base}/address/{address}"
+    else:  # Solana
+        address_explorer_url = f"{explorer_base}/account/{address}"
 
     msg = f"📊 <b>Информация об адресе</b>\n\n"
+
+    # Network name
+    msg += f"🌐 <b>Сеть:</b> {network_name}\n"
+
+    # Address with link
     msg += f"📍 <a href='{address_explorer_url}'><b>{address[:8]}...{address[-6:]}</b></a>\n\n"
 
     # Exchange status
@@ -566,7 +580,7 @@ def format_wallet_info(info: dict) -> str:
 
     # Balance - Total Value (текущий баланс)
     if balance is not None:
-        msg += f"💰 <b>Total Value:</b> {balance:.4f} SOL\n\n"
+        msg += f"💰 <b>Total Value:</b> {balance:.4f} {symbol}\n\n"
     else:
         msg += f"💰 <b>Total Value:</b> Недоступен\n\n"
 

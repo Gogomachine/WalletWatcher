@@ -11,6 +11,8 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from src.solana import SolanaClient
+from src.evm import EVMClient
+from src.blockchain import UniversalBlockchainClient
 from src.database import Database
 from src.bot import router, init_handlers, AddressMonitor
 
@@ -53,7 +55,12 @@ async def main():
         logger.error("TELEGRAM_BOT_TOKEN not found in environment variables")
         return
 
+    # RPC URLs for different networks
     solana_rpc_url = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+    ethereum_rpc_url = os.getenv("ETHEREUM_RPC_URL", "https://eth.llamarpc.com")
+    bsc_rpc_url = os.getenv("BSC_RPC_URL", "https://bsc-dataseed.binance.org")
+    polygon_rpc_url = os.getenv("POLYGON_RPC_URL", "https://polygon-rpc.com")
+
     database_path = os.getenv("DATABASE_PATH", "./data/bot.db")
     monitor_interval = int(os.getenv("MONITOR_INTERVAL", "10"))
 
@@ -66,8 +73,24 @@ async def main():
     dp = Dispatcher(storage=storage)
 
     # Инициализация клиентов
-    logger.info("Initializing Solana client...")
+    logger.info("Initializing blockchain clients...")
+
+    # Solana client
     solana_client = SolanaClient(solana_rpc_url)
+
+    # EVM clients
+    ethereum_client = EVMClient(ethereum_rpc_url, network="ethereum")
+    bsc_client = EVMClient(bsc_rpc_url, network="bsc")
+    polygon_client = EVMClient(polygon_rpc_url, network="polygon")
+
+    # Universal client
+    blockchain_client = UniversalBlockchainClient(
+        solana_client=solana_client,
+        ethereum_client=ethereum_client,
+        bsc_client=bsc_client,
+        polygon_client=polygon_client,
+        default_evm_client=ethereum_client
+    )
 
     logger.info("Initializing database...")
     database = Database(database_path)
@@ -78,31 +101,29 @@ async def main():
     monitor = AddressMonitor(
         solana_client=solana_client,
         database=database,
-        notification_callback=lambda uid, msg: send_notification(bot, uid, msg),
+        notification_callback=lambda user_id, msg: send_notification(bot, user_id, msg),
         interval=monitor_interval
     )
 
     # Инициализация обработчиков
-    init_handlers(solana_client, database, monitor)
+    init_handlers(blockchain_client, database, monitor)
+
+    # Регистрация роутера
     dp.include_router(router)
 
     # Запуск монитора
     await monitor.start()
 
+    # Запуск бота
     logger.info("Bot started!")
     try:
-        # Запуск polling
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        await dp.start_polling(bot)
     finally:
-        # Очистка ресурсов
         logger.info("Shutting down...")
         await monitor.stop()
-        await solana_client.close()
+        await blockchain_client.close()
         await bot.session.close()
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+    asyncio.run(main())
