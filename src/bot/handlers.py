@@ -98,16 +98,20 @@ async def cmd_help(message: Message):
         "/check <адрес> - Проверить адрес\n"
         "/track <адрес> - Добавить адрес в отслеживание\n"
         "/list - Мои отслеживаемые адреса\n"
+        "/whales - Показать активность китов\n"
         "/settings - Настройки\n\n"
         "<b>Получение информации:</b>\n"
         "Просто отправьте Solana адрес, и я покажу всю информацию о нём:\n"
         "• Баланс в SOL\n"
+        "• Статус кошелька (Whale/Dolphin/Fish)\n"
         "• Возраст кошелька\n"
         "• Последняя транзакция\n"
         "• Является ли адрес биржевым\n\n"
         "<b>Отслеживание:</b>\n"
         "Добавьте адрес в список отслеживания, и вы будете получать уведомления "
-        "о каждой новой транзакции в режиме реального времени."
+        "о каждой новой транзакции в режиме реального времени.\n\n"
+        "<b>Whale Tracking:</b>\n"
+        "Используйте команду /whales для просмотра крупных переводов SOL."
     )
 
 
@@ -199,6 +203,55 @@ async def cmd_list(message: Message):
 async def cmd_settings(message: Message):
     """Handle /settings command."""
     await show_settings(message)
+
+
+@router.message(Command("whales"))
+async def cmd_whales(message: Message):
+    """Handle /whales command to show recent whale transfers."""
+    await message.reply("🐋 Получаю информацию о китах...")
+
+    # Get whale minimum from environment or use default
+    import os
+    whale_min_balance = float(os.getenv("WHALE_MIN_BALANCE", "10000"))
+
+    # Fetch whale transfers
+    transfers = await solana_client.get_whale_transfers(limit=10, min_amount=whale_min_balance)
+
+    if not transfers:
+        if not solana_client.helius_api_key:
+            await message.reply(
+                "❌ <b>Функция недоступна</b>\n\n"
+                "Для отслеживания китов требуется Helius API ключ.\n"
+                "Добавьте HELIUS_API_KEY в файл .env",
+                parse_mode="HTML"
+            )
+        else:
+            await message.reply(
+                "📊 <b>Активность китов</b>\n\n"
+                "В данный момент крупных переводов не обнаружено.\n\n"
+                f"🔍 Отслеживаются переводы от {whale_min_balance:,.0f} SOL",
+                parse_mode="HTML"
+            )
+        return
+
+    # Format whale transfers message
+    msg = f"🐋 <b>Крупные переводы (последние {len(transfers)})</b>\n\n"
+    msg += f"Минимальная сумма: {whale_min_balance:,.0f} SOL\n\n"
+
+    for idx, tx in enumerate(transfers, 1):
+        amount = tx['amount']
+        from_addr = tx['from']
+        to_addr = tx['to']
+
+        # Classify whale tier
+        whale_tier = solana_client.classify_whale(amount)
+
+        msg += f"{idx}. {whale_tier['emoji']} <b>{amount:,.2f} SOL</b>\n"
+        msg += f"   От: <code>{from_addr[:8]}...{from_addr[-6:]}</code>\n"
+        msg += f"   Кому: <code>{to_addr[:8]}...{to_addr[-6:]}</code>\n"
+        msg += f"   🔗 <a href='{tx['explorer_url']}'>Посмотреть транзакцию</a>\n\n"
+
+    await message.reply(msg, disable_web_page_preview=True, parse_mode="HTML")
 
 
 # Callback handlers для inline кнопок
@@ -554,6 +607,7 @@ def format_wallet_info(info: dict) -> str:
     last_tx = info.get('last_transaction')
     is_exchange = info.get('is_exchange')
     exchange_name = info.get('exchange_name')
+    whale_tier = info.get('whale_tier')
 
     # Get network info
     network_name = info.get('network_name', 'Unknown')
@@ -577,6 +631,10 @@ def format_wallet_info(info: dict) -> str:
     # Exchange status
     if is_exchange:
         msg += f"🏦 <b>Биржа:</b> {exchange_name} ✅\n\n"
+
+    # Whale tier status
+    if whale_tier:
+        msg += f"{whale_tier['emoji']} <b>Статус:</b> {whale_tier['name']}\n\n"
 
     # Balance - Total Value (текущий баланс)
     if balance is not None:
