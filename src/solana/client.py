@@ -263,35 +263,53 @@ class SolanaClient:
             return []
 
         try:
-            # Use Helius enhanced transactions API
-            url = f"{self.helius_base_url}/addresses/recent-transfers"
-            params = {
-                "api-key": self.helius_api_key,
-                "limit": limit,
-            }
+            # Known whale addresses to monitor
+            whale_addresses = [
+                "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9",  # Binance
+                "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",  # Binance
+                "H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS",  # Coinbase
+                "DhzDDB92TDj3LCSqHxZ72gVMVfVsLqkuN5bDCDa5h7oE",  # Kraken
+            ]
+
+            all_whale_transfers = []
 
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        # Filter for large transfers
-                        whale_transfers = []
-                        for tx in data:
-                            # Parse transaction for SOL transfers
-                            if "nativeTransfers" in tx:
-                                for transfer in tx["nativeTransfers"]:
-                                    amount_sol = transfer.get("amount", 0) / 1_000_000_000
-                                    if amount_sol >= min_amount:
-                                        whale_transfers.append({
-                                            "signature": tx.get("signature", ""),
-                                            "timestamp": tx.get("timestamp", 0),
-                                            "from": transfer.get("fromUserAccount", ""),
-                                            "to": transfer.get("toUserAccount", ""),
-                                            "amount": amount_sol,
-                                            "explorer_url": f"https://solscan.io/tx/{tx.get('signature', '')}"
-                                        })
-                        return whale_transfers[:limit]
-                    return []
+                for address in whale_addresses[:2]:  # Check first 2 to avoid rate limits
+                    # Use Helius Enhanced Transactions API
+                    url = f"{self.helius_base_url}/addresses/{address}/transactions"
+                    params = {
+                        "api-key": self.helius_api_key,
+                        "limit": 10,
+                    }
+
+                    try:
+                        async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                            if response.status == 200:
+                                data = await response.json()
+
+                                # Parse transactions
+                                for tx in data:
+                                    # Check for native transfers
+                                    if "nativeTransfers" in tx:
+                                        for transfer in tx["nativeTransfers"]:
+                                            amount_sol = transfer.get("amount", 0) / 1_000_000_000
+                                            if amount_sol >= min_amount:
+                                                all_whale_transfers.append({
+                                                    "signature": tx.get("signature", ""),
+                                                    "timestamp": tx.get("timestamp", 0),
+                                                    "from": transfer.get("fromUserAccount", ""),
+                                                    "to": transfer.get("toUserAccount", ""),
+                                                    "amount": amount_sol,
+                                                    "explorer_url": f"https://solscan.io/tx/{tx.get('signature', '')}"
+                                                })
+                    except Exception as e:
+                        print(f"Error fetching transactions for {address}: {e}")
+                        continue
+
+            # Sort by timestamp (most recent first) and limit
+            all_whale_transfers.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+            return all_whale_transfers[:limit]
+
         except Exception as e:
             print(f"Error fetching whale transfers: {e}")
             return []

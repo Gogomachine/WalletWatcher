@@ -1,5 +1,6 @@
 """Bot command handlers."""
 
+import os
 import re
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
@@ -210,7 +211,6 @@ async def cmd_whales(message: Message):
     await message.reply("🐋 Получаю информацию о китах...")
 
     # Get whale minimum from environment or use default
-    import os
     whale_min_balance = float(os.getenv("WHALE_MIN_BALANCE", "10000"))
 
     # Fetch whale transfers
