@@ -54,6 +54,7 @@ async def main():
         return
 
     solana_rpc_url = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+    helius_api_key = os.getenv("HELIUS_API_KEY")
     database_path = os.getenv("DATABASE_PATH", "./data/bot.db")
     monitor_interval = int(os.getenv("MONITOR_INTERVAL", "10"))
 
@@ -67,7 +68,7 @@ async def main():
 
     # Инициализация клиентов
     logger.info("Initializing Solana client...")
-    solana_client = SolanaClient(solana_rpc_url)
+    solana_client = SolanaClient(solana_rpc_url, helius_api_key)
 
     logger.info("Initializing database...")
     database = Database(database_path)

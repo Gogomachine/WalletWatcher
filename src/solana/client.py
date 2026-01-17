@@ -1,8 +1,10 @@
 """Solana blockchain client for wallet information retrieval."""
 
 import asyncio
+import os
 from datetime import datetime
 from typing import Optional, Dict, List
+import aiohttp
 from solana.rpc.async_api import AsyncClient
 from solana.rpc.commitment import Confirmed
 from solders.pubkey import Pubkey
@@ -26,17 +28,29 @@ KNOWN_EXCHANGES = {
     ],
 }
 
+# Whale classification tiers (in SOL)
+WHALE_TIERS = {
+    "mega_whale": {"min": 100000, "emoji": "🐋", "name": "Mega Whale"},
+    "whale": {"min": 10000, "emoji": "🐳", "name": "Whale"},
+    "dolphin": {"min": 1000, "emoji": "🐬", "name": "Dolphin"},
+    "fish": {"min": 100, "emoji": "🐟", "name": "Fish"},
+    "shrimp": {"min": 0, "emoji": "🦐", "name": "Shrimp"},
+}
+
 
 class SolanaClient:
     """Client for interacting with Solana blockchain."""
 
-    def __init__(self, rpc_url: str):
+    def __init__(self, rpc_url: str, helius_api_key: Optional[str] = None):
         """Initialize Solana client.
 
         Args:
             rpc_url: Solana RPC endpoint URL
+            helius_api_key: Optional Helius API key for enhanced features
         """
         self.client = AsyncClient(rpc_url)
+        self.helius_api_key = helius_api_key
+        self.helius_base_url = "https://api.helius.xyz/v0"
         self.exchange_addresses = self._flatten_exchange_addresses()
 
     def _flatten_exchange_addresses(self) -> Dict[str, str]:
@@ -209,6 +223,79 @@ class SolanaClient:
             "formatted": " ".join(age_parts)
         }
 
+    def classify_whale(self, balance: float) -> Dict[str, str]:
+        """Classify address based on balance.
+
+        Args:
+            balance: SOL balance
+
+        Returns:
+            Dict with tier info (tier_key, name, emoji)
+        """
+        for tier_key in ["mega_whale", "whale", "dolphin", "fish", "shrimp"]:
+            tier_info = WHALE_TIERS[tier_key]
+            if balance >= tier_info["min"]:
+                return {
+                    "tier": tier_key,
+                    "name": tier_info["name"],
+                    "emoji": tier_info["emoji"],
+                    "min_balance": tier_info["min"]
+                }
+        # Default to shrimp
+        return {
+            "tier": "shrimp",
+            "name": WHALE_TIERS["shrimp"]["name"],
+            "emoji": WHALE_TIERS["shrimp"]["emoji"],
+            "min_balance": 0
+        }
+
+    async def get_whale_transfers(self, limit: int = 20, min_amount: float = 10000) -> List[Dict]:
+        """Get recent large transfers using Helius API.
+
+        Args:
+            limit: Maximum number of transfers to retrieve
+            min_amount: Minimum SOL amount to consider (default 10000 SOL)
+
+        Returns:
+            List of large transfer events
+        """
+        if not self.helius_api_key:
+            return []
+
+        try:
+            # Use Helius enhanced transactions API
+            url = f"{self.helius_base_url}/addresses/recent-transfers"
+            params = {
+                "api-key": self.helius_api_key,
+                "limit": limit,
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        # Filter for large transfers
+                        whale_transfers = []
+                        for tx in data:
+                            # Parse transaction for SOL transfers
+                            if "nativeTransfers" in tx:
+                                for transfer in tx["nativeTransfers"]:
+                                    amount_sol = transfer.get("amount", 0) / 1_000_000_000
+                                    if amount_sol >= min_amount:
+                                        whale_transfers.append({
+                                            "signature": tx.get("signature", ""),
+                                            "timestamp": tx.get("timestamp", 0),
+                                            "from": transfer.get("fromUserAccount", ""),
+                                            "to": transfer.get("toUserAccount", ""),
+                                            "amount": amount_sol,
+                                            "explorer_url": f"https://solscan.io/tx/{tx.get('signature', '')}"
+                                        })
+                        return whale_transfers[:limit]
+                    return []
+        except Exception as e:
+            print(f"Error fetching whale transfers: {e}")
+            return []
+
     async def get_wallet_info(self, address: str) -> Dict:
         """Get comprehensive wallet information.
 
@@ -235,6 +322,11 @@ class SolanaClient:
         # Check if exchange
         exchange = self.is_exchange_address(address)
 
+        # Classify whale tier
+        whale_tier = None
+        if balance is not None:
+            whale_tier = self.classify_whale(balance)
+
         return {
             "address": address,
             "is_exchange": exchange is not None,
@@ -242,4 +334,5 @@ class SolanaClient:
             "balance": balance,
             "wallet_age": wallet_age,
             "last_transaction": last_tx,
+            "whale_tier": whale_tier,
         }
