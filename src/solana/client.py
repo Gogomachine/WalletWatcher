@@ -2,14 +2,15 @@
 
 import asyncio
 import os
+import random
 from datetime import datetime
 from typing import Optional, Dict, List
+from pathlib import Path
 import aiohttp
 from solana.rpc.async_api import AsyncClient
 from solana.rpc.commitment import Confirmed
 from solders.pubkey import Pubkey
 from solders.signature import Signature
-from src.telegram.channel_parser import WhaleChannelParser
 
 
 # Known exchange addresses (можно расширить)
@@ -42,25 +43,18 @@ WHALE_TIERS = {
 class SolanaClient:
     """Client for interacting with Solana blockchain."""
 
-    def __init__(self, rpc_url: str, helius_api_key: Optional[str] = None,
-                 telegram_api_id: Optional[int] = None, telegram_api_hash: Optional[str] = None):
+    def __init__(self, rpc_url: str, helius_api_key: Optional[str] = None):
         """Initialize Solana client.
 
         Args:
             rpc_url: Solana RPC endpoint URL
             helius_api_key: Optional Helius API key for enhanced features
-            telegram_api_id: Optional Telegram API ID for channel parsing
-            telegram_api_hash: Optional Telegram API hash for channel parsing
         """
         self.client = AsyncClient(rpc_url)
         self.helius_api_key = helius_api_key
         self.helius_base_url = "https://api.helius.xyz/v0"
         self.exchange_addresses = self._flatten_exchange_addresses()
-
-        # Initialize Telegram channel parser if credentials provided
-        self.channel_parser = None
-        if telegram_api_id and telegram_api_hash:
-            self.channel_parser = WhaleChannelParser(telegram_api_id, telegram_api_hash)
+        self.whale_addresses_file = Path("data/whale_addresses.txt")
 
     def _flatten_exchange_addresses(self) -> Dict[str, str]:
         """Flatten exchange addresses into a single dict."""
@@ -73,8 +67,6 @@ class SolanaClient:
     async def close(self):
         """Close the client connection."""
         await self.client.close()
-        if self.channel_parser:
-            await self.channel_parser.disconnect()
 
     def is_exchange_address(self, address: str) -> Optional[str]:
         """Check if address belongs to a known exchange.
@@ -261,27 +253,42 @@ class SolanaClient:
         }
 
     async def discover_whale_address(self, min_balance_usd: float = 100000) -> Optional[str]:
-        """Discover random whale address from @solanawhaletracking Telegram channel.
+        """Get random address from the whale addresses list.
 
-        Parses recent messages from the channel and extracts addresses from "👨‍💼 To:" field.
+        Reads addresses from data/whale_addresses.txt and returns a random one.
+        Not all addresses are guaranteed to be whales.
 
         Args:
             min_balance_usd: Minimum balance in USD (not used, kept for compatibility)
 
         Returns:
-            Random whale address or None
+            Random address from the list or None if file not found
         """
-        if not self.channel_parser:
-            print("Telegram channel parser not initialized. Please provide TELEGRAM_API_ID and TELEGRAM_API_HASH.")
-            return None
-
         try:
-            # Get random address from channel
-            address = await self.channel_parser.get_random_whale_address()
-            return address
+            if not self.whale_addresses_file.exists():
+                print(f"❌ Whale addresses file not found: {self.whale_addresses_file}")
+                return None
+
+            # Read addresses from file
+            addresses = []
+            with open(self.whale_addresses_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    # Skip empty lines and comments
+                    if line and not line.startswith('#'):
+                        addresses.append(line)
+
+            if not addresses:
+                print(f"⚠️  No addresses found in {self.whale_addresses_file}")
+                return None
+
+            # Return random address
+            selected = random.choice(addresses)
+            print(f"✅ Selected random address from {len(addresses)} available: {selected}")
+            return selected
 
         except Exception as e:
-            print(f"Error discovering whale address from channel: {e}")
+            print(f"❌ Error reading whale addresses: {e}")
             return None
 
     async def get_wallet_info(self, address: str) -> Dict:
