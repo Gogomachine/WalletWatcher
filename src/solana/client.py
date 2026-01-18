@@ -101,57 +101,114 @@ class SolanaClient:
             return None
 
     async def get_token_accounts(self, address: str) -> List[Dict]:
-        """Get all SPL token accounts for an address.
+        """Get all SPL token accounts for an address using Helius or Solscan API.
 
         Args:
             address: Solana address
 
         Returns:
-            List of token accounts with balances
+            List of token accounts with balances and metadata
+        """
+        # Try Helius API first if API key is available
+        if self.helius_api_key:
+            tokens = await self._get_tokens_helius(address)
+            if tokens:
+                return tokens
+
+        # Fallback to Solscan API
+        tokens = await self._get_tokens_solscan(address)
+        return tokens
+
+    async def _get_tokens_helius(self, address: str) -> List[Dict]:
+        """Get tokens using Helius API.
+
+        Args:
+            address: Solana address
+
+        Returns:
+            List of tokens with metadata
         """
         try:
-            pubkey = Pubkey.from_string(address)
+            url = f"{self.helius_base_url}/addresses/{address}/balances"
+            params = {"api-key": self.helius_api_key}
 
-            # Token Program ID for SPL tokens
-            token_program_id = Pubkey.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status != 200:
+                        print(f"Helius API error: {response.status}")
+                        return []
 
-            # Get token accounts owned by this address
-            response = await self.client.get_token_accounts_by_owner_json_parsed(
-                pubkey,
-                {"programId": str(token_program_id)},
-                commitment=Confirmed
-            )
+                    data = await response.json()
+                    tokens = []
 
-            if not response.value:
-                return []
+                    # Parse token data from Helius response
+                    token_list = data.get('tokens', [])
+                    for token in token_list:
+                        amount = token.get('amount')
+                        decimals = token.get('decimals', 0)
 
-            tokens = []
-            for account_info in response.value:
-                try:
-                    account_data = account_info.account.data
-                    if hasattr(account_data, 'parsed'):
-                        parsed = account_data.parsed
-                        if isinstance(parsed, dict) and 'info' in parsed:
-                            info = parsed['info']
-                            token_amount = info.get('tokenAmount', {})
+                        if amount and decimals:
+                            # Convert to UI amount
+                            ui_amount = float(amount) / (10 ** decimals)
 
-                            # Only include tokens with non-zero balance
-                            ui_amount = token_amount.get('uiAmount')
-                            if ui_amount and float(ui_amount) > 0:
+                            if ui_amount > 0:
                                 tokens.append({
-                                    'mint': info.get('mint'),
-                                    'amount': float(ui_amount),
-                                    'decimals': token_amount.get('decimals', 0)
+                                    'mint': token.get('mint'),
+                                    'amount': ui_amount,
+                                    'decimals': decimals,
+                                    'symbol': token.get('tokenAccount', {}).get('symbol'),
+                                    'name': token.get('tokenAccount', {}).get('name')
                                 })
-                except Exception as e:
-                    print(f"Error parsing token account: {e}")
-                    continue
 
-            return tokens
+                    print(f"Helius API: Found {len(tokens)} tokens for {address}")
+                    return tokens
+
         except Exception as e:
-            print(f"Error getting token accounts for {address}: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"Error getting tokens from Helius: {e}")
+            return []
+
+    async def _get_tokens_solscan(self, address: str) -> List[Dict]:
+        """Get tokens using Solscan API.
+
+        Args:
+            address: Solana address
+
+        Returns:
+            List of tokens
+        """
+        try:
+            url = f"https://api.solscan.io/account/tokens"
+            params = {"address": address}
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status != 200:
+                        print(f"Solscan API error: {response.status}")
+                        return []
+
+                    data = await response.json()
+                    tokens = []
+
+                    # Solscan returns different format, parse it
+                    token_list = data if isinstance(data, list) else data.get('data', [])
+
+                    for token in token_list:
+                        amount = token.get('tokenAmount', {}).get('uiAmount')
+
+                        if amount and float(amount) > 0:
+                            tokens.append({
+                                'mint': token.get('tokenAddress') or token.get('mint'),
+                                'amount': float(amount),
+                                'decimals': token.get('tokenAmount', {}).get('decimals', 0),
+                                'symbol': token.get('tokenSymbol'),
+                                'name': token.get('tokenName')
+                            })
+
+                    print(f"Solscan API: Found {len(tokens)} tokens for {address}")
+                    return tokens
+
+        except Exception as e:
+            print(f"Error getting tokens from Solscan: {e}")
             return []
 
     async def get_transaction_signatures(

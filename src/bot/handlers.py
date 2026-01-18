@@ -715,11 +715,23 @@ def format_wallet_info(info: dict) -> str:
     if tokens:
         msg += f"🪙 <b>Токены ({len(tokens)}):</b>\n"
         for token in tokens[:10]:  # Show max 10 tokens
-            mint = token['mint']
-            amount = token['amount']
-            # Show shortened mint address
-            mint_short = f"{mint[:8]}...{mint[-4:]}"
-            msg += f"  • {amount:,.2f} (<code>{mint_short}</code>)\n"
+            mint = token.get('mint', '')
+            amount = token.get('amount', 0)
+            symbol = token.get('symbol')
+            name = token.get('name')
+
+            # Format token display with symbol/name if available
+            if symbol:
+                token_display = f"<b>{symbol}</b>"
+                if name and name != symbol:
+                    token_display += f" ({name})"
+            else:
+                # Show shortened mint address if no symbol
+                mint_short = f"{mint[:8]}...{mint[-4:]}"
+                token_display = f"<code>{mint_short}</code>"
+
+            msg += f"  • {amount:,.2f} {token_display}\n"
+
         if len(tokens) > 10:
             msg += f"  ... и ещё {len(tokens) - 10}\n"
         msg += "\n"
