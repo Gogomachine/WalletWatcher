@@ -28,14 +28,7 @@ def get_tier_discovery_keyboard() -> InlineKeyboardMarkup:
         Inline keyboard with tier buttons
     """
     buttons = [
-        [
-            InlineKeyboardButton(text="🐳 Whale", callback_data="discover_whale"),
-            InlineKeyboardButton(text="🐬 Dolphin", callback_data="discover_dolphin")
-        ],
-        [
-            InlineKeyboardButton(text="🐟 Fish", callback_data="discover_fish"),
-            InlineKeyboardButton(text="🦐 Shrimp", callback_data="discover_shrimp")
-        ],
+        [InlineKeyboardButton(text="🐳 Whale (10,000+ SOL)", callback_data="discover_whale")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="cancel")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)

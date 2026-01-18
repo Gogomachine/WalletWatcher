@@ -274,6 +274,9 @@ class SolanaClient:
         try:
             import random
 
+            # Collect ALL matching addresses first, then pick random
+            matching_addresses = []
+
             # Strategy 1: For whales/mega_whales, check known large addresses first
             if tier in ["whale", "mega_whale"]:
                 # Known large addresses (exchanges, validators, DAOs)
@@ -286,15 +289,13 @@ class SolanaClient:
                     "GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE",  # Magic Eden
                 ]
 
-                random.shuffle(known_large_addresses)
-
                 for address in known_large_addresses:
                     balance = await self.get_balance(address)
                     if balance is not None:
                         if max_balance is None and balance >= min_balance:
-                            return address
+                            matching_addresses.append(address)
                         elif max_balance and min_balance <= balance < max_balance:
-                            return address
+                            matching_addresses.append(address)
 
             # Strategy 2: Collect addresses from recent transactions
             addresses_to_check = set()
@@ -354,18 +355,13 @@ class SolanaClient:
                 except Exception as e:
                     print(f"Error getting RPC signatures: {e}")
 
-            # If still no addresses, return None
-            if len(addresses_to_check) == 0:
-                print(f"No addresses collected for tier {tier}")
-                return None
-
             print(f"Collected {len(addresses_to_check)} addresses to check for tier {tier}")
 
             # Shuffle and check addresses for matching tier
             addresses_list = list(addresses_to_check)
             random.shuffle(addresses_list)
 
-            # Check more addresses for better chances
+            # Check addresses and collect ALL matches
             max_checks = min(50, len(addresses_list))
 
             for address in addresses_list[:max_checks]:
@@ -376,16 +372,20 @@ class SolanaClient:
                         if max_balance is None:
                             # Top tier (mega_whale) - no upper limit
                             if balance >= min_balance:
-                                print(f"Found {tier}: {address} with {balance} SOL")
-                                return address
+                                matching_addresses.append(address)
                         else:
                             # Has both min and max
                             if min_balance <= balance < max_balance:
-                                print(f"Found {tier}: {address} with {balance} SOL")
-                                return address
+                                matching_addresses.append(address)
                 except Exception as e:
                     print(f"Error checking balance for {address}: {e}")
                     continue
+
+            # If we found matches, return random one
+            if matching_addresses:
+                selected = random.choice(matching_addresses)
+                print(f"Found {len(matching_addresses)} matching addresses for {tier}, selected: {selected}")
+                return selected
 
             print(f"No matching address found for tier {tier} after checking {max_checks} addresses")
             return None

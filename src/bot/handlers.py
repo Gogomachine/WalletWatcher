@@ -100,12 +100,8 @@ async def cmd_help(message: Message):
         "/check <адрес> - Проверить адрес\n"
         "/track <адрес> - Добавить адрес в отслеживание\n"
         "/list - Мои отслеживаемые адреса\n"
-        "/settings - Настройки\n\n"
-        "<b>🎯 Поиск случайных кошельков (геймификация):</b>\n"
         "/whale - Найти случайный Whale кошелёк (10,000+ SOL)\n"
-        "/dolphin - Найти случайный Dolphin кошелёк (1,000+ SOL)\n"
-        "/fish - Найти случайный Fish кошелёк (100+ SOL)\n"
-        "/shrimp - Найти случайный Shrimp кошелёк (<100 SOL)\n\n"
+        "/settings - Настройки\n\n"
         "<b>Получение информации:</b>\n"
         "Просто отправьте Solana адрес, и я покажу всю информацию о нём:\n"
         "• Баланс в SOL\n"
@@ -113,6 +109,9 @@ async def cmd_help(message: Message):
         "• Возраст кошелька\n"
         "• Последняя транзакция\n"
         "• Является ли адрес биржевым\n\n"
+        "<b>🐳 Whale Hunting (поиск случайных китов):</b>\n"
+        "Используйте команду /whale или кнопку в меню для поиска случайных кошельков "
+        "с балансом 10,000+ SOL. Бот сканирует активность крупных бирж и находит интересные адреса!\n\n"
         "<b>Отслеживание:</b>\n"
         "Добавьте адрес в список отслеживания, и вы будете получать уведомления "
         "о каждой новой транзакции в режиме реального времени."
@@ -255,24 +254,6 @@ async def cmd_whale(message: Message):
     await discover_and_show_tier(message, "whale", "Whale", "🐳")
 
 
-@router.message(Command("dolphin"))
-async def cmd_dolphin(message: Message):
-    """Handle /dolphin command - discover random dolphin address."""
-    await discover_and_show_tier(message, "dolphin", "Dolphin", "🐬")
-
-
-@router.message(Command("fish"))
-async def cmd_fish(message: Message):
-    """Handle /fish command - discover random fish address."""
-    await discover_and_show_tier(message, "fish", "Fish", "🐟")
-
-
-@router.message(Command("shrimp"))
-async def cmd_shrimp(message: Message):
-    """Handle /shrimp command - discover random shrimp address."""
-    await discover_and_show_tier(message, "shrimp", "Shrimp", "🦐")
-
-
 # Callback handlers для inline кнопок
 
 
@@ -338,11 +319,9 @@ async def menu_discover_callback(callback: CallbackQuery):
     """Handle 'Discover random wallet' menu button."""
     await callback.message.edit_text(
         "🎯 <b>Поиск случайного кошелька</b>\n\n"
-        "Выберите категорию кошелька:\n\n"
-        "🐳 <b>Whale</b> - 10,000+ SOL\n"
-        "🐬 <b>Dolphin</b> - 1,000+ SOL\n"
-        "🐟 <b>Fish</b> - 100+ SOL\n"
-        "🦐 <b>Shrimp</b> - менее 100 SOL",
+        "Найдите случайный Whale кошелёк из активных адресов в сети Solana.\n\n"
+        "🐳 <b>Whale</b> - кошельки с балансом 10,000+ SOL\n\n"
+        "Бот сканирует недавние транзакции крупных бирж и находит случайные адреса с большим балансом.",
         reply_markup=get_tier_discovery_keyboard(),
         parse_mode="HTML"
     )
@@ -632,24 +611,6 @@ async def discover_and_show_tier_callback(callback: CallbackQuery, tier: str, ti
 async def discover_whale_callback(callback: CallbackQuery):
     """Handle discover whale button."""
     await discover_and_show_tier_callback(callback, "whale", "Whale", "🐳")
-
-
-@router.callback_query(F.data == "discover_dolphin")
-async def discover_dolphin_callback(callback: CallbackQuery):
-    """Handle discover dolphin button."""
-    await discover_and_show_tier_callback(callback, "dolphin", "Dolphin", "🐬")
-
-
-@router.callback_query(F.data == "discover_fish")
-async def discover_fish_callback(callback: CallbackQuery):
-    """Handle discover fish button."""
-    await discover_and_show_tier_callback(callback, "fish", "Fish", "🐟")
-
-
-@router.callback_query(F.data == "discover_shrimp")
-async def discover_shrimp_callback(callback: CallbackQuery):
-    """Handle discover shrimp button."""
-    await discover_and_show_tier_callback(callback, "shrimp", "Shrimp", "🦐")
 
 
 async def show_settings(message: Message):
