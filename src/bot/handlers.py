@@ -221,7 +221,7 @@ async def discover_and_show_tier(message: Message, tier: str, tier_name: str, em
     status_msg = await message.reply(f"{emoji} Ищу случайный {tier_name} кошелёк...")
 
     # Discover random address
-    address = await solana_client.discover_random_address_by_tier(tier)
+    address = await blockchain_client.discover_random_address_by_tier(tier)
 
     if not address:
         await status_msg.edit_text(
@@ -233,7 +233,7 @@ async def discover_and_show_tier(message: Message, tier: str, tier_name: str, em
 
     # Get wallet info
     await status_msg.edit_text(f"{emoji} Нашёл! Получаю информацию...")
-    info = await solana_client.get_wallet_info(address)
+    info = await blockchain_client.get_wallet_info(address)
 
     if "error" in info:
         await status_msg.edit_text(
@@ -598,7 +598,7 @@ async def discover_and_show_tier_callback(callback: CallbackQuery, tier: str, ti
     await callback.answer()
 
     # Discover random address
-    address = await solana_client.discover_random_address_by_tier(tier)
+    address = await blockchain_client.discover_random_address_by_tier(tier)
 
     if not address:
         await callback.message.edit_text(
@@ -611,7 +611,7 @@ async def discover_and_show_tier_callback(callback: CallbackQuery, tier: str, ti
 
     # Get wallet info
     await callback.message.edit_text(f"{emoji} Нашёл! Получаю информацию...")
-    info = await solana_client.get_wallet_info(address)
+    info = await blockchain_client.get_wallet_info(address)
 
     if "error" in info:
         await callback.message.edit_text(

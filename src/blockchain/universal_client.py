@@ -125,6 +125,36 @@ class UniversalBlockchainClient:
 
         return {"error": "Unsupported network type"}
 
+    def classify_whale(self, balance: float, network_type: str = "solana") -> Dict:
+        """Classify wallet based on balance.
+
+        Args:
+            balance: Balance amount
+            network_type: Network type (currently only supports "solana")
+
+        Returns:
+            Dict with tier info
+        """
+        if network_type == "solana":
+            return self.solana_client.classify_whale(balance)
+        # For EVM networks, could add different classifications in future
+        return None
+
+    async def discover_random_address_by_tier(self, tier: str = "whale", network: str = "solana"):
+        """Discover random address of specified tier.
+
+        Args:
+            tier: Tier to search for (mega_whale, whale, dolphin, fish, shrimp)
+            network: Network to search on (currently only "solana" supported)
+
+        Returns:
+            Random address of specified tier or None
+        """
+        if network == "solana":
+            return await self.solana_client.discover_random_address_by_tier(tier)
+        # For EVM networks, could add discovery in future
+        return None
+
     async def close(self):
         """Close all client connections."""
         if self.solana_client:
