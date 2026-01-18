@@ -14,9 +14,7 @@ from .keyboards import (
     get_address_actions_keyboard,
     get_notifications_keyboard,
     get_cancel_keyboard,
-    get_skip_keyboard,
-    get_tier_discovery_keyboard,
-    get_track_address_keyboard
+    get_skip_keyboard
 )
 from ..blockchain.universal_client import UniversalBlockchainClient, detect_address_type
 from ..database.db import Database
@@ -101,7 +99,6 @@ async def cmd_help(message: Message):
         "/check <адрес> - Проверить адрес\n"
         "/track <адрес> - Добавить адрес в отслеживание\n"
         "/list - Мои отслеживаемые адреса\n"
-        "/whale - Найти случайный Whale кошелёк (10,000+ SOL)\n"
         "/settings - Настройки\n\n"
         "<b>Получение информации:</b>\n"
         "Просто отправьте Solana адрес, и я покажу всю информацию о нём:\n"
@@ -110,9 +107,6 @@ async def cmd_help(message: Message):
         "• Возраст кошелька\n"
         "• Последняя транзакция\n"
         "• Является ли адрес биржевым\n\n"
-        "<b>🐳 Whale Hunting (поиск случайных китов):</b>\n"
-        "Используйте команду /whale или кнопку в меню для поиска случайных кошельков "
-        "с балансом 10,000+ SOL. Бот сканирует активность крупных бирж и находит интересные адреса!\n\n"
         "<b>Отслеживание:</b>\n"
         "Добавьте адрес в список отслеживания, и вы будете получать уведомления "
         "о каждой новой транзакции в режиме реального времени."
@@ -209,57 +203,6 @@ async def cmd_settings(message: Message):
     await show_settings(message)
 
 
-async def discover_and_show_tier(message: Message, tier: str, tier_name: str, emoji: str):
-    """Discover and display a random address of specified tier.
-
-    Args:
-        message: Message object
-        tier: Tier key (whale, dolphin, fish, shrimp)
-        tier_name: Display name of tier
-        emoji: Emoji for tier
-    """
-    status_msg = await message.reply(f"{emoji} Ищу случайный {tier_name} кошелёк...")
-
-    # Discover random address
-    address = await blockchain_client.discover_random_address_by_tier(tier)
-
-    if not address:
-        await status_msg.edit_text(
-            f"❌ <b>Не удалось найти {tier_name}</b>\n\n"
-            f"Попробуйте позже или поищите другой тир.",
-            parse_mode="HTML"
-        )
-        return
-
-    # Get wallet info
-    await status_msg.edit_text(f"{emoji} Нашёл! Получаю информацию...")
-    info = await blockchain_client.get_wallet_info(address)
-
-    if "error" in info:
-        await status_msg.edit_text(
-            f"❌ Ошибка при получении информации: {info['error']}",
-            parse_mode="HTML"
-        )
-        return
-
-    # Format and send wallet info
-    msg = f"🎯 <b>Найден случайный {tier_name}!</b>\n\n"
-    msg += format_wallet_info(info)
-
-    await status_msg.edit_text(
-        msg,
-        disable_web_page_preview=True,
-        parse_mode="HTML",
-        reply_markup=get_track_address_keyboard(address)
-    )
-
-
-@router.message(Command("whale"))
-async def cmd_whale(message: Message):
-    """Handle /whale command - discover random whale address."""
-    await discover_and_show_tier(message, "whale", "Whale", "🐳")
-
-
 # Callback handlers для inline кнопок
 
 
@@ -318,20 +261,6 @@ async def menu_list_callback(callback: CallbackQuery):
 async def menu_settings_callback(callback: CallbackQuery):
     """Handle 'Settings' menu button."""
     await show_settings_callback(callback)
-
-
-@router.callback_query(F.data == "menu_discover")
-async def menu_discover_callback(callback: CallbackQuery):
-    """Handle 'Discover random wallet' menu button."""
-    await callback.message.edit_text(
-        "🎯 <b>Поиск случайного кошелька</b>\n\n"
-        "Найдите случайный Whale кошелёк из активных адресов в сети Solana.\n\n"
-        "🐳 <b>Whale</b> - кошельки с балансом 10,000+ SOL\n\n"
-        "Бот сканирует недавние транзакции крупных бирж и находит случайные адреса с большим балансом.",
-        reply_markup=get_tier_discovery_keyboard(),
-        parse_mode="HTML"
-    )
-    await callback.answer()
 
 
 @router.callback_query(F.data == "cancel")
@@ -565,89 +494,6 @@ async def back_to_list(callback: CallbackQuery):
         parse_mode="HTML"
     )
     await callback.answer()
-
-
-# Tier discovery callbacks
-
-
-async def discover_and_show_tier_callback(callback: CallbackQuery, tier: str, tier_name: str, emoji: str):
-    """Discover and display a random address of specified tier via callback.
-
-    Args:
-        callback: CallbackQuery object
-        tier: Tier key (whale, dolphin, fish, shrimp)
-        tier_name: Display name of tier
-        emoji: Emoji for tier
-    """
-    await callback.message.edit_text(f"{emoji} Ищу случайный {tier_name} кошелёк...")
-    await callback.answer()
-
-    # Discover random address
-    address = await blockchain_client.discover_random_address_by_tier(tier)
-
-    if not address:
-        await callback.message.edit_text(
-            f"❌ <b>Не удалось найти {tier_name}</b>\n\n"
-            f"Попробуйте позже или поищите другой тир.",
-            reply_markup=get_tier_discovery_keyboard(),
-            parse_mode="HTML"
-        )
-        return
-
-    # Get wallet info
-    await callback.message.edit_text(f"{emoji} Нашёл! Получаю информацию...")
-    info = await blockchain_client.get_wallet_info(address)
-
-    if "error" in info:
-        await callback.message.edit_text(
-            f"❌ Ошибка при получении информации: {info['error']}",
-            reply_markup=get_tier_discovery_keyboard(),
-            parse_mode="HTML"
-        )
-        return
-
-    # Format and send wallet info
-    msg = f"🎯 <b>Найден случайный {tier_name}!</b>\n\n"
-    msg += format_wallet_info(info)
-
-    await callback.message.edit_text(
-        msg,
-        disable_web_page_preview=True,
-        parse_mode="HTML",
-        reply_markup=get_track_address_keyboard(address)
-    )
-
-
-@router.callback_query(F.data == "discover_whale")
-async def discover_whale_callback(callback: CallbackQuery):
-    """Handle discover whale button."""
-    await discover_and_show_tier_callback(callback, "whale", "Whale", "🐳")
-
-
-@router.callback_query(F.data.startswith("track_"))
-async def track_address_callback(callback: CallbackQuery):
-    """Handle track address button from whale discovery."""
-    address = callback.data.split("_", 1)[1]
-
-    # Add address to tracking
-    success = await database.add_tracked_address(
-        callback.from_user.id,
-        address,
-        None
-    )
-
-    if success:
-        await callback.answer(
-            "✅ Адрес добавлен в отслеживание!",
-            show_alert=True
-        )
-        # Update the message to remove the button
-        await callback.message.edit_reply_markup(reply_markup=None)
-    else:
-        await callback.answer(
-            "❌ Этот адрес уже отслеживается",
-            show_alert=True
-        )
 
 
 async def show_settings(message: Message):

@@ -140,21 +140,6 @@ class UniversalBlockchainClient:
         # For EVM networks, could add different classifications in future
         return None
 
-    async def discover_random_address_by_tier(self, tier: str = "whale", network: str = "solana"):
-        """Discover random address of specified tier.
-
-        Args:
-            tier: Tier to search for (mega_whale, whale, dolphin, fish, shrimp)
-            network: Network to search on (currently only "solana" supported)
-
-        Returns:
-            Random address of specified tier or None
-        """
-        if network == "solana":
-            return await self.solana_client.discover_random_address_by_tier(tier)
-        # For EVM networks, could add discovery in future
-        return None
-
     async def close(self):
         """Close all client connections."""
         if self.solana_client:

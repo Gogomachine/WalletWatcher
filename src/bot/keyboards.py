@@ -15,21 +15,7 @@ def get_main_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="➕ Добавить адрес", callback_data="menu_add"),
             InlineKeyboardButton(text="📋 Мои адреса", callback_data="menu_list")
         ],
-        [InlineKeyboardButton(text="🎯 Найти случайный кошелёк", callback_data="menu_discover")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu_settings")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def get_tier_discovery_keyboard() -> InlineKeyboardMarkup:
-    """Get keyboard for tier discovery (gamification).
-
-    Returns:
-        Inline keyboard with tier buttons
-    """
-    buttons = [
-        [InlineKeyboardButton(text="🐳 Whale (10,000+ SOL)", callback_data="discover_whale")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="cancel")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -120,19 +106,4 @@ def get_notifications_keyboard(enabled: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=button_text, callback_data="toggle_notifications")],
     ]
 
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def get_track_address_keyboard(address: str) -> InlineKeyboardMarkup:
-    """Get keyboard with track address button.
-
-    Args:
-        address: Address to track
-
-    Returns:
-        Inline keyboard with track button
-    """
-    buttons = [
-        [InlineKeyboardButton(text="➕ Отслеживать этот адрес", callback_data=f"track_{address}")],
-    ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
