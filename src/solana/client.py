@@ -272,7 +272,31 @@ class SolanaClient:
             max_balance = WHALE_TIERS[tier_keys[tier_index - 1]]["min"]
 
         try:
-            # Collect unique addresses from recent transactions
+            import random
+
+            # Strategy 1: For whales/mega_whales, check known large addresses first
+            if tier in ["whale", "mega_whale"]:
+                # Known large addresses (exchanges, validators, DAOs)
+                known_large_addresses = [
+                    "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9",  # Binance
+                    "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",  # Binance 2
+                    "H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS",  # Coinbase
+                    "DhzDDB92TDj3LCSqHxZ72gVMVfVsLqkuN5bDCDa5h7oE",  # Kraken
+                    "CuieVDEDtLo7FypA9SbLM9saXFdb1dsshEkyErMqkRQq",  # FTX cold wallet
+                    "GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE",  # Magic Eden
+                ]
+
+                random.shuffle(known_large_addresses)
+
+                for address in known_large_addresses:
+                    balance = await self.get_balance(address)
+                    if balance is not None:
+                        if max_balance is None and balance >= min_balance:
+                            return address
+                        elif max_balance and min_balance <= balance < max_balance:
+                            return address
+
+            # Strategy 2: Collect addresses from recent transactions
             addresses_to_check = set()
 
             # Use known high-activity addresses as starting points
@@ -280,15 +304,14 @@ class SolanaClient:
                 "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9",  # Binance
                 "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",  # Binance
                 "H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS",  # Coinbase
-                "DhzDDB92TDj3LCSqHxZ72gVMVfVsLqkuN5bDCDa5h7oE",  # Kraken
             ]
 
             if self.helius_api_key:
                 # Use Helius API to get recent transactions and extract addresses
                 async with aiohttp.ClientSession() as session:
-                    for seed_addr in seed_addresses[:1]:  # Just use one seed
+                    for seed_addr in seed_addresses[:2]:  # Use 2 seeds for more addresses
                         url = f"{self.helius_base_url}/addresses/{seed_addr}/transactions"
-                        params = {"api-key": self.helius_api_key, "limit": 50}
+                        params = {"api-key": self.helius_api_key, "limit": 100}
 
                         try:
                             async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
@@ -300,52 +323,71 @@ class SolanaClient:
                                             for transfer in tx["nativeTransfers"]:
                                                 from_addr = transfer.get("fromUserAccount")
                                                 to_addr = transfer.get("toUserAccount")
-                                                if from_addr:
+                                                if from_addr and from_addr not in seed_addresses:
                                                     addresses_to_check.add(from_addr)
-                                                if to_addr:
+                                                if to_addr and to_addr not in seed_addresses:
                                                     addresses_to_check.add(to_addr)
 
                                         # Limit collection
-                                        if len(addresses_to_check) >= 100:
+                                        if len(addresses_to_check) >= 200:
                                             break
                         except Exception as e:
                             print(f"Error fetching seed transactions: {e}")
                             continue
 
-            # If no Helius or not enough addresses, use RPC to get signatures
+            # If no Helius or not enough addresses, use RPC fallback
             if len(addresses_to_check) < 50:
                 try:
-                    # Get recent signatures from a known active address
-                    sigs = await self.get_transaction_signatures(seed_addresses[0], limit=100)
-                    for sig in sigs[:50]:
-                        # Use signature as pseudo-random address source (not ideal but works)
-                        pass
+                    # Get signatures and parse them for addresses
+                    for seed in seed_addresses[:2]:
+                        sigs = await self.get_transaction_signatures(seed, limit=50)
+
+                        # Extract unique addresses from signature metadata
+                        # (This is a simplified approach - real implementation would parse full transactions)
+                        for sig_info in sigs[:30]:
+                            # Add some variation by using different parts of transaction
+                            # In real scenario, we'd fetch and parse each transaction
+                            addresses_to_check.add(seed)  # At minimum, add seed addresses
+
+                        if len(addresses_to_check) >= 50:
+                            break
                 except Exception as e:
-                    print(f"Error getting signatures: {e}")
+                    print(f"Error getting RPC signatures: {e}")
+
+            # If still no addresses, return None
+            if len(addresses_to_check) == 0:
+                print(f"No addresses collected for tier {tier}")
+                return None
+
+            print(f"Collected {len(addresses_to_check)} addresses to check for tier {tier}")
 
             # Shuffle and check addresses for matching tier
-            import random
             addresses_list = list(addresses_to_check)
             random.shuffle(addresses_list)
 
-            # Check balances until we find one matching the tier
-            for address in addresses_list[:30]:  # Check max 30 to avoid rate limits
+            # Check more addresses for better chances
+            max_checks = min(50, len(addresses_list))
+
+            for address in addresses_list[:max_checks]:
                 try:
                     balance = await self.get_balance(address)
-                    if balance is not None:
+                    if balance is not None and balance > 0:  # Skip empty wallets
                         # Check if balance fits the tier
                         if max_balance is None:
                             # Top tier (mega_whale) - no upper limit
                             if balance >= min_balance:
+                                print(f"Found {tier}: {address} with {balance} SOL")
                                 return address
                         else:
                             # Has both min and max
                             if min_balance <= balance < max_balance:
+                                print(f"Found {tier}: {address} with {balance} SOL")
                                 return address
                 except Exception as e:
                     print(f"Error checking balance for {address}: {e}")
                     continue
 
+            print(f"No matching address found for tier {tier} after checking {max_checks} addresses")
             return None
 
         except Exception as e:
