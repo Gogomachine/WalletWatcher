@@ -61,6 +61,18 @@ async def main():
     bsc_rpc_url = os.getenv("BSC_RPC_URL", "https://bsc-dataseed.binance.org")
     polygon_rpc_url = os.getenv("POLYGON_RPC_URL", "https://polygon-rpc.com")
 
+    # Telegram API credentials for channel parsing
+    telegram_api_id = os.getenv("TELEGRAM_API_ID")
+    telegram_api_hash = os.getenv("TELEGRAM_API_HASH")
+
+    # Convert API ID to int if provided
+    if telegram_api_id:
+        try:
+            telegram_api_id = int(telegram_api_id)
+        except ValueError:
+            logger.warning("Invalid TELEGRAM_API_ID format, whale discovery will be disabled")
+            telegram_api_id = None
+
     database_path = os.getenv("DATABASE_PATH", "./data/bot.db")
     monitor_interval = int(os.getenv("MONITOR_INTERVAL", "10"))
 
@@ -75,8 +87,14 @@ async def main():
     # Инициализация клиентов
     logger.info("Initializing blockchain clients...")
 
-    # Solana client
-    solana_client = SolanaClient(solana_rpc_url)
+    # Solana client with Telegram channel parser support
+    helius_api_key = os.getenv("HELIUS_API_KEY")
+    solana_client = SolanaClient(
+        solana_rpc_url,
+        helius_api_key=helius_api_key,
+        telegram_api_id=telegram_api_id,
+        telegram_api_hash=telegram_api_hash
+    )
 
     # EVM clients
     ethereum_client = EVMClient(ethereum_rpc_url, network="ethereum")
