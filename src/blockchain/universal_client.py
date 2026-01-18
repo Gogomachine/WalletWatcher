@@ -140,6 +140,17 @@ class UniversalBlockchainClient:
         # For EVM networks, could add different classifications in future
         return None
 
+    async def discover_whale_address(self, min_balance_usd: float = 100000):
+        """Discover random whale address.
+
+        Args:
+            min_balance_usd: Minimum balance in USD
+
+        Returns:
+            Random whale address or None
+        """
+        return await self.solana_client.discover_whale_address(min_balance_usd)
+
     async def close(self):
         """Close all client connections."""
         if self.solana_client:

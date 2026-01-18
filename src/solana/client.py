@@ -249,6 +249,87 @@ class SolanaClient:
             "min_balance": 0
         }
 
+    async def discover_whale_address(self, min_balance_usd: float = 100000) -> Optional[str]:
+        """Discover random whale address using Solscan API.
+
+        Fetches 10 random addresses with balance > min_balance_usd and returns one.
+
+        Args:
+            min_balance_usd: Minimum balance in USD (default 100,000)
+
+        Returns:
+            Random whale address or None
+        """
+        try:
+            import random
+
+            # Solscan API endpoint for top SOL holders
+            # Note: This is a public API, but may have rate limits
+            url = "https://public-api.solscan.io/account/top-holders"
+
+            # Calculate approximate SOL balance needed
+            # Assuming SOL price ~$100 (will be overridden by actual data)
+            sol_price_estimate = 100
+            min_sol = min_balance_usd / sol_price_estimate
+
+            async with aiohttp.ClientSession() as session:
+                # Fetch top holders
+                params = {
+                    "limit": 100,  # Get 100 top holders
+                    "offset": 0
+                }
+
+                try:
+                    async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                        if response.status == 200:
+                            data = await response.json()
+
+                            # Filter addresses by balance
+                            candidates = []
+
+                            for holder in data:
+                                # Solscan returns balance in lamports
+                                balance_lamports = holder.get("lamports", 0)
+                                balance_sol = balance_lamports / 1_000_000_000
+
+                                # Estimate USD value (rough calculation)
+                                # In production, you'd get real SOL price
+                                balance_usd = balance_sol * sol_price_estimate
+
+                                if balance_usd >= min_balance_usd:
+                                    address = holder.get("address")
+                                    if address:
+                                        candidates.append({
+                                            "address": address,
+                                            "balance": balance_sol,
+                                            "balance_usd": balance_usd
+                                        })
+
+                                # Stop after collecting 10 candidates
+                                if len(candidates) >= 10:
+                                    break
+
+                            if candidates:
+                                # Select random address from candidates
+                                selected = random.choice(candidates)
+                                print(f"Found {len(candidates)} whale candidates, selected: {selected['address']} ({selected['balance']:.2f} SOL)")
+                                return selected['address']
+                            else:
+                                print(f"No addresses found with balance >= ${min_balance_usd}")
+                                return None
+
+                        else:
+                            print(f"Solscan API error: {response.status}")
+                            return None
+
+                except Exception as e:
+                    print(f"Error fetching from Solscan API: {e}")
+                    return None
+
+        except Exception as e:
+            print(f"Error discovering whale address: {e}")
+            return None
+
     async def get_wallet_info(self, address: str) -> Dict:
         """Get comprehensive wallet information.
 

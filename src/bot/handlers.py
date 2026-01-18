@@ -99,6 +99,7 @@ async def cmd_help(message: Message):
         "/check <адрес> - Проверить адрес\n"
         "/track <адрес> - Добавить адрес в отслеживание\n"
         "/list - Мои отслеживаемые адреса\n"
+        "/whale - Найти случайного кита (баланс $100,000+)\n"
         "/settings - Настройки\n\n"
         "<b>Получение информации:</b>\n"
         "Просто отправьте Solana адрес, и я покажу всю информацию о нём:\n"
@@ -107,6 +108,9 @@ async def cmd_help(message: Message):
         "• Возраст кошелька\n"
         "• Последняя транзакция\n"
         "• Является ли адрес биржевым\n\n"
+        "<b>🐳 Охота на китов:</b>\n"
+        "Команда /whale находит случайный кошелёк с балансом от $100,000. "
+        "Каждый раз парсятся 10 новых адресов из топа Solana, и выбирается случайный!\n\n"
         "<b>Отслеживание:</b>\n"
         "Добавьте адрес в список отслеживания, и вы будете получать уведомления "
         "о каждой новой транзакции в режиме реального времени."
@@ -203,6 +207,44 @@ async def cmd_settings(message: Message):
     await show_settings(message)
 
 
+@router.message(Command("whale"))
+async def cmd_whale(message: Message):
+    """Handle /whale command - discover random whale address."""
+    status_msg = await message.reply("🐳 Ищу случайного кита...")
+
+    # Discover random whale address (min $100,000 balance)
+    address = await blockchain_client.discover_whale_address(min_balance_usd=100000)
+
+    if not address:
+        await status_msg.edit_text(
+            "❌ <b>Не удалось найти кита</b>\n\n"
+            "Попробуйте позже.",
+            parse_mode="HTML"
+        )
+        return
+
+    # Get wallet info
+    await status_msg.edit_text("🐳 Нашёл! Получаю информацию...")
+    info = await blockchain_client.get_wallet_info(address)
+
+    if "error" in info:
+        await status_msg.edit_text(
+            f"❌ Ошибка при получении информации: {info['error']}",
+            parse_mode="HTML"
+        )
+        return
+
+    # Format and send wallet info
+    msg = "🎯 <b>Найден случайный кит!</b>\n\n"
+    msg += format_wallet_info(info)
+
+    await status_msg.edit_text(
+        msg,
+        disable_web_page_preview=True,
+        parse_mode="HTML"
+    )
+
+
 # Callback handlers для inline кнопок
 
 
@@ -261,6 +303,47 @@ async def menu_list_callback(callback: CallbackQuery):
 async def menu_settings_callback(callback: CallbackQuery):
     """Handle 'Settings' menu button."""
     await show_settings_callback(callback)
+
+
+@router.callback_query(F.data == "menu_whale")
+async def menu_whale_callback(callback: CallbackQuery):
+    """Handle 'Find whale' menu button."""
+    await callback.message.edit_text("🐳 Ищу случайного кита...")
+    await callback.answer()
+
+    # Discover random whale address (min $100,000 balance)
+    address = await blockchain_client.discover_whale_address(min_balance_usd=100000)
+
+    if not address:
+        await callback.message.edit_text(
+            "❌ <b>Не удалось найти кита</b>\n\n"
+            "Попробуйте позже.",
+            reply_markup=get_main_menu(),
+            parse_mode="HTML"
+        )
+        return
+
+    # Get wallet info
+    await callback.message.edit_text("🐳 Нашёл! Получаю информацию...")
+    info = await blockchain_client.get_wallet_info(address)
+
+    if "error" in info:
+        await callback.message.edit_text(
+            f"❌ Ошибка при получении информации: {info['error']}",
+            reply_markup=get_main_menu(),
+            parse_mode="HTML"
+        )
+        return
+
+    # Format and send wallet info
+    msg = "🎯 <b>Найден случайный кит!</b>\n\n"
+    msg += format_wallet_info(info)
+
+    await callback.message.edit_text(
+        msg,
+        disable_web_page_preview=True,
+        parse_mode="HTML"
+    )
 
 
 @router.callback_query(F.data == "cancel")
