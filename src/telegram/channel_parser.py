@@ -2,6 +2,7 @@
 
 import re
 import random
+import os
 from typing import Optional, List
 from telethon import TelegramClient
 from telethon.tl.types import Message
@@ -10,25 +11,46 @@ from telethon.tl.types import Message
 class WhaleChannelParser:
     """Parser for @solanawhaletracking Telegram channel."""
 
-    def __init__(self, api_id: int, api_hash: str, session_name: str = "whale_parser"):
+    def __init__(self, api_id: int, api_hash: str, phone: Optional[str] = None, session_name: str = "whale_parser"):
         """Initialize Telegram client.
 
         Args:
             api_id: Telegram API ID from my.telegram.org
             api_hash: Telegram API hash from my.telegram.org
+            phone: Phone number for authentication (only needed for first setup)
             session_name: Session file name for Telethon
         """
         self.api_id = api_id
         self.api_hash = api_hash
+        self.phone = phone
         self.session_name = session_name
         self.client = None
         self.channel_username = "solanawhaletracking"
 
     async def connect(self):
-        """Connect to Telegram."""
+        """Connect to Telegram.
+
+        Note: First-time connection requires phone authentication.
+        After that, the session is saved and reused.
+        """
         if self.client is None:
             self.client = TelegramClient(self.session_name, self.api_id, self.api_hash)
-            await self.client.start()
+
+            # Check if session file exists
+            session_file = f"{self.session_name}.session"
+            if not os.path.exists(session_file):
+                print(f"⚠️  Session file not found. Please run setup script first to authenticate.")
+                print(f"   Run: python3 scripts/setup_telegram.py")
+                return False
+
+            await self.client.connect()
+
+            if not await self.client.is_user_authorized():
+                print(f"⚠️  Session expired. Please run setup script to re-authenticate.")
+                print(f"   Run: python3 scripts/setup_telegram.py")
+                return False
+
+            return True
 
     async def disconnect(self):
         """Disconnect from Telegram."""
@@ -71,7 +93,10 @@ class WhaleChannelParser:
             List of unique Solana addresses
         """
         if not self.client:
-            await self.connect()
+            connected = await self.connect()
+            if not connected:
+                print("❌ Failed to connect to Telegram. Whale discovery unavailable.")
+                return []
 
         addresses = []
 
@@ -87,7 +112,8 @@ class WhaleChannelParser:
                     addresses.append(address)
 
         except Exception as e:
-            print(f"Error fetching messages from {self.channel_username}: {e}")
+            print(f"❌ Error fetching messages from {self.channel_username}: {e}")
+            return []
 
         return addresses
 
