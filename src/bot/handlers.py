@@ -14,7 +14,8 @@ from .keyboards import (
     get_address_actions_keyboard,
     get_notifications_keyboard,
     get_cancel_keyboard,
-    get_skip_keyboard
+    get_skip_keyboard,
+    get_tier_discovery_keyboard
 )
 from ..blockchain.universal_client import UniversalBlockchainClient, detect_address_type
 from ..database.db import Database
@@ -99,20 +100,22 @@ async def cmd_help(message: Message):
         "/check <адрес> - Проверить адрес\n"
         "/track <адрес> - Добавить адрес в отслеживание\n"
         "/list - Мои отслеживаемые адреса\n"
-        "/whales - Показать активность китов\n"
         "/settings - Настройки\n\n"
+        "<b>🎯 Поиск случайных кошельков (геймификация):</b>\n"
+        "/whale - Найти случайный Whale кошелёк (10,000+ SOL)\n"
+        "/dolphin - Найти случайный Dolphin кошелёк (1,000+ SOL)\n"
+        "/fish - Найти случайный Fish кошелёк (100+ SOL)\n"
+        "/shrimp - Найти случайный Shrimp кошелёк (<100 SOL)\n\n"
         "<b>Получение информации:</b>\n"
         "Просто отправьте Solana адрес, и я покажу всю информацию о нём:\n"
         "• Баланс в SOL\n"
-        "• Статус кошелька (Whale/Dolphin/Fish)\n"
+        "• Статус кошелька (Whale/Dolphin/Fish/Shrimp)\n"
         "• Возраст кошелька\n"
         "• Последняя транзакция\n"
         "• Является ли адрес биржевым\n\n"
         "<b>Отслеживание:</b>\n"
         "Добавьте адрес в список отслеживания, и вы будете получать уведомления "
-        "о каждой новой транзакции в режиме реального времени.\n\n"
-        "<b>Whale Tracking:</b>\n"
-        "Используйте команду /whales для просмотра крупных переводов SOL."
+        "о каждой новой транзакции в режиме реального времени."
     )
 
 
@@ -206,52 +209,68 @@ async def cmd_settings(message: Message):
     await show_settings(message)
 
 
-@router.message(Command("whales"))
-async def cmd_whales(message: Message):
-    """Handle /whales command to show recent whale transfers."""
-    await message.reply("🐋 Получаю информацию о китах...")
+async def discover_and_show_tier(message: Message, tier: str, tier_name: str, emoji: str):
+    """Discover and display a random address of specified tier.
 
-    # Get whale minimum from environment or use default
-    whale_min_balance = float(os.getenv("WHALE_MIN_BALANCE", "10000"))
+    Args:
+        message: Message object
+        tier: Tier key (whale, dolphin, fish, shrimp)
+        tier_name: Display name of tier
+        emoji: Emoji for tier
+    """
+    status_msg = await message.reply(f"{emoji} Ищу случайный {tier_name} кошелёк...")
 
-    # Fetch whale transfers
-    transfers = await solana_client.get_whale_transfers(limit=10, min_amount=whale_min_balance)
+    # Discover random address
+    address = await solana_client.discover_random_address_by_tier(tier)
 
-    if not transfers:
-        if not solana_client.helius_api_key:
-            await message.reply(
-                "❌ <b>Функция недоступна</b>\n\n"
-                "Для отслеживания китов требуется Helius API ключ.\n"
-                "Добавьте HELIUS_API_KEY в файл .env",
-                parse_mode="HTML"
-            )
-        else:
-            await message.reply(
-                "📊 <b>Активность китов</b>\n\n"
-                "В данный момент крупных переводов не обнаружено.\n\n"
-                f"🔍 Отслеживаются переводы от {whale_min_balance:,.0f} SOL",
-                parse_mode="HTML"
-            )
+    if not address:
+        await status_msg.edit_text(
+            f"❌ <b>Не удалось найти {tier_name}</b>\n\n"
+            f"Попробуйте позже или поищите другой тир.",
+            parse_mode="HTML"
+        )
         return
 
-    # Format whale transfers message
-    msg = f"🐋 <b>Крупные переводы (последние {len(transfers)})</b>\n\n"
-    msg += f"Минимальная сумма: {whale_min_balance:,.0f} SOL\n\n"
+    # Get wallet info
+    await status_msg.edit_text(f"{emoji} Нашёл! Получаю информацию...")
+    info = await solana_client.get_wallet_info(address)
 
-    for idx, tx in enumerate(transfers, 1):
-        amount = tx['amount']
-        from_addr = tx['from']
-        to_addr = tx['to']
+    if "error" in info:
+        await status_msg.edit_text(
+            f"❌ Ошибка при получении информации: {info['error']}",
+            parse_mode="HTML"
+        )
+        return
 
-        # Classify whale tier
-        whale_tier = solana_client.classify_whale(amount)
+    # Format and send wallet info
+    msg = f"🎯 <b>Найден случайный {tier_name}!</b>\n\n"
+    msg += format_wallet_info(info)
 
-        msg += f"{idx}. {whale_tier['emoji']} <b>{amount:,.2f} SOL</b>\n"
-        msg += f"   От: <code>{from_addr[:8]}...{from_addr[-6:]}</code>\n"
-        msg += f"   Кому: <code>{to_addr[:8]}...{to_addr[-6:]}</code>\n"
-        msg += f"   🔗 <a href='{tx['explorer_url']}'>Посмотреть транзакцию</a>\n\n"
+    await status_msg.edit_text(msg, disable_web_page_preview=True, parse_mode="HTML")
 
-    await message.reply(msg, disable_web_page_preview=True, parse_mode="HTML")
+
+@router.message(Command("whale"))
+async def cmd_whale(message: Message):
+    """Handle /whale command - discover random whale address."""
+    await discover_and_show_tier(message, "whale", "Whale", "🐳")
+
+
+@router.message(Command("dolphin"))
+async def cmd_dolphin(message: Message):
+    """Handle /dolphin command - discover random dolphin address."""
+    await discover_and_show_tier(message, "dolphin", "Dolphin", "🐬")
+
+
+@router.message(Command("fish"))
+async def cmd_fish(message: Message):
+    """Handle /fish command - discover random fish address."""
+    await discover_and_show_tier(message, "fish", "Fish", "🐟")
+
+
+@router.message(Command("shrimp"))
+async def cmd_shrimp(message: Message):
+    """Handle /shrimp command - discover random shrimp address."""
+    await discover_and_show_tier(message, "shrimp", "Shrimp", "🦐")
 
 
 # Callback handlers для inline кнопок
@@ -312,6 +331,22 @@ async def menu_list_callback(callback: CallbackQuery):
 async def menu_settings_callback(callback: CallbackQuery):
     """Handle 'Settings' menu button."""
     await show_settings_callback(callback)
+
+
+@router.callback_query(F.data == "menu_discover")
+async def menu_discover_callback(callback: CallbackQuery):
+    """Handle 'Discover random wallet' menu button."""
+    await callback.message.edit_text(
+        "🎯 <b>Поиск случайного кошелька</b>\n\n"
+        "Выберите категорию кошелька:\n\n"
+        "🐳 <b>Whale</b> - 10,000+ SOL\n"
+        "🐬 <b>Dolphin</b> - 1,000+ SOL\n"
+        "🐟 <b>Fish</b> - 100+ SOL\n"
+        "🦐 <b>Shrimp</b> - менее 100 SOL",
+        reply_markup=get_tier_discovery_keyboard(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "cancel")
@@ -545,6 +580,76 @@ async def back_to_list(callback: CallbackQuery):
         parse_mode="HTML"
     )
     await callback.answer()
+
+
+# Tier discovery callbacks
+
+
+async def discover_and_show_tier_callback(callback: CallbackQuery, tier: str, tier_name: str, emoji: str):
+    """Discover and display a random address of specified tier via callback.
+
+    Args:
+        callback: CallbackQuery object
+        tier: Tier key (whale, dolphin, fish, shrimp)
+        tier_name: Display name of tier
+        emoji: Emoji for tier
+    """
+    await callback.message.edit_text(f"{emoji} Ищу случайный {tier_name} кошелёк...")
+    await callback.answer()
+
+    # Discover random address
+    address = await solana_client.discover_random_address_by_tier(tier)
+
+    if not address:
+        await callback.message.edit_text(
+            f"❌ <b>Не удалось найти {tier_name}</b>\n\n"
+            f"Попробуйте позже или поищите другой тир.",
+            reply_markup=get_tier_discovery_keyboard(),
+            parse_mode="HTML"
+        )
+        return
+
+    # Get wallet info
+    await callback.message.edit_text(f"{emoji} Нашёл! Получаю информацию...")
+    info = await solana_client.get_wallet_info(address)
+
+    if "error" in info:
+        await callback.message.edit_text(
+            f"❌ Ошибка при получении информации: {info['error']}",
+            reply_markup=get_tier_discovery_keyboard(),
+            parse_mode="HTML"
+        )
+        return
+
+    # Format and send wallet info
+    msg = f"🎯 <b>Найден случайный {tier_name}!</b>\n\n"
+    msg += format_wallet_info(info)
+
+    await callback.message.edit_text(msg, disable_web_page_preview=True, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "discover_whale")
+async def discover_whale_callback(callback: CallbackQuery):
+    """Handle discover whale button."""
+    await discover_and_show_tier_callback(callback, "whale", "Whale", "🐳")
+
+
+@router.callback_query(F.data == "discover_dolphin")
+async def discover_dolphin_callback(callback: CallbackQuery):
+    """Handle discover dolphin button."""
+    await discover_and_show_tier_callback(callback, "dolphin", "Dolphin", "🐬")
+
+
+@router.callback_query(F.data == "discover_fish")
+async def discover_fish_callback(callback: CallbackQuery):
+    """Handle discover fish button."""
+    await discover_and_show_tier_callback(callback, "fish", "Fish", "🐟")
+
+
+@router.callback_query(F.data == "discover_shrimp")
+async def discover_shrimp_callback(callback: CallbackQuery):
+    """Handle discover shrimp button."""
+    await discover_and_show_tier_callback(callback, "shrimp", "Shrimp", "🦐")
 
 
 async def show_settings(message: Message):

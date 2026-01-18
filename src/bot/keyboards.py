@@ -15,7 +15,28 @@ def get_main_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="➕ Добавить адрес", callback_data="menu_add"),
             InlineKeyboardButton(text="📋 Мои адреса", callback_data="menu_list")
         ],
+        [InlineKeyboardButton(text="🎯 Найти случайный кошелёк", callback_data="menu_discover")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu_settings")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_tier_discovery_keyboard() -> InlineKeyboardMarkup:
+    """Get keyboard for tier discovery (gamification).
+
+    Returns:
+        Inline keyboard with tier buttons
+    """
+    buttons = [
+        [
+            InlineKeyboardButton(text="🐳 Whale", callback_data="discover_whale"),
+            InlineKeyboardButton(text="🐬 Dolphin", callback_data="discover_dolphin")
+        ],
+        [
+            InlineKeyboardButton(text="🐟 Fish", callback_data="discover_fish"),
+            InlineKeyboardButton(text="🦐 Shrimp", callback_data="discover_shrimp")
+        ],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="cancel")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
