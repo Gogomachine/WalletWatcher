@@ -15,7 +15,8 @@ from .keyboards import (
     get_notifications_keyboard,
     get_cancel_keyboard,
     get_skip_keyboard,
-    get_whale_result_keyboard
+    get_whale_result_keyboard,
+    get_persistent_keyboard
 )
 from ..blockchain.universal_client import UniversalBlockchainClient, detect_address_type
 from ..database.db import Database
@@ -73,7 +74,8 @@ async def cmd_start(message: Message):
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await message.reply(
             "👋 Привет! Я бот для отслеживания Solana адресов.\n\n"
-            "Отправьте адрес или используйте /menu для просмотра команд."
+            "Отправьте адрес или используйте /menu для просмотра команд.",
+            reply_markup=get_persistent_keyboard()
         )
     else:
         await message.answer(
@@ -84,6 +86,11 @@ async def cmd_start(message: Message):
             f"• Отслеживать адреса в реальном времени\n"
             f"• Уведомлять о новых транзакциях\n\n"
             f"Используйте меню ниже для навигации:",
+            reply_markup=get_persistent_keyboard()
+        )
+        # Send inline menu after persistent keyboard
+        await message.answer(
+            "📱 Главное меню:",
             reply_markup=get_main_menu()
         )
 
@@ -122,6 +129,15 @@ async def cmd_help(message: Message):
 async def cmd_menu(message: Message):
     """Handle /menu command."""
     await message.reply(
+        "📱 Главное меню:",
+        reply_markup=get_main_menu()
+    )
+
+
+@router.message(F.text == "📱 Главное меню")
+async def text_menu_button(message: Message):
+    """Handle persistent menu button press."""
+    await message.answer(
         "📱 Главное меню:",
         reply_markup=get_main_menu()
     )
