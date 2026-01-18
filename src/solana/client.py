@@ -263,19 +263,18 @@ class SolanaClient:
         try:
             import random
 
-            # Solscan API endpoint for top SOL holders
-            # Note: This is a public API, but may have rate limits
-            url = "https://public-api.solscan.io/account/top-holders"
-
             # Calculate approximate SOL balance needed
             # Assuming SOL price ~$100 (will be overridden by actual data)
             sol_price_estimate = 100
             min_sol = min_balance_usd / sol_price_estimate
 
+            # Strategy 1: Try Solscan API first
+            url = "https://api.solscan.io/account/top-holders"
+
             async with aiohttp.ClientSession() as session:
-                # Fetch top holders
+                # Fetch top holders from Solscan
                 params = {
-                    "limit": 100,  # Get 100 top holders
+                    "limit": 100,
                     "offset": 0
                 }
 
@@ -287,17 +286,19 @@ class SolanaClient:
                             # Filter addresses by balance
                             candidates = []
 
-                            for holder in data:
+                            # Check if data is a list or dict with data key
+                            items = data if isinstance(data, list) else data.get('data', [])
+
+                            for holder in items:
                                 # Solscan returns balance in lamports
-                                balance_lamports = holder.get("lamports", 0)
+                                balance_lamports = holder.get("lamports", 0) or holder.get("balance", 0)
                                 balance_sol = balance_lamports / 1_000_000_000
 
                                 # Estimate USD value (rough calculation)
-                                # In production, you'd get real SOL price
                                 balance_usd = balance_sol * sol_price_estimate
 
                                 if balance_usd >= min_balance_usd:
-                                    address = holder.get("address")
+                                    address = holder.get("address") or holder.get("account")
                                     if address:
                                         candidates.append({
                                             "address": address,
@@ -312,19 +313,45 @@ class SolanaClient:
                             if candidates:
                                 # Select random address from candidates
                                 selected = random.choice(candidates)
-                                print(f"Found {len(candidates)} whale candidates, selected: {selected['address']} ({selected['balance']:.2f} SOL)")
+                                print(f"Found {len(candidates)} whale candidates via Solscan, selected: {selected['address']} ({selected['balance']:.2f} SOL)")
                                 return selected['address']
-                            else:
-                                print(f"No addresses found with balance >= ${min_balance_usd}")
-                                return None
-
-                        else:
-                            print(f"Solscan API error: {response.status}")
-                            return None
 
                 except Exception as e:
-                    print(f"Error fetching from Solscan API: {e}")
-                    return None
+                    print(f"Solscan API failed: {e}")
+
+                # Strategy 2: Use known large addresses as fallback
+                print("Using known whale addresses as fallback")
+                known_whales = [
+                    "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9",  # Binance
+                    "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",  # Binance 2
+                    "H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS",  # Coinbase
+                    "DhzDDB92TDj3LCSqHxZ72gVMVfVsLqkuN5bDCDa5h7oE",  # Kraken
+                    "CuieVDEDtLo7FypA9SbLM9saXFdb1dsshEkyErMqkRQq",  # FTX cold wallet
+                    "GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE",  # Magic Eden
+                    "2ojv9BAiHUrvsm9gxDe7fJSzbNZSJcxZvf8dqmWGHG8S",  # Raydium
+                    "7YttLkHDoNj9wyDur5pM1ejNaAvT9X4eqaYcHQqtj2G5",  # Serum DEX
+                    "So11111111111111111111111111111111111111112",  # Wrapped SOL
+                    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",  # Token Program
+                ]
+
+                # Verify balances and pick random
+                valid_candidates = []
+                for addr in known_whales:
+                    try:
+                        balance = await self.get_balance(addr)
+                        if balance and balance * sol_price_estimate >= min_balance_usd:
+                            valid_candidates.append(addr)
+                    except Exception as e:
+                        print(f"Error checking {addr}: {e}")
+                        continue
+
+                if valid_candidates:
+                    selected = random.choice(valid_candidates)
+                    print(f"Selected from known whales: {selected}")
+                    return selected
+
+                print("No whale addresses found")
+                return None
 
         except Exception as e:
             print(f"Error discovering whale address: {e}")
