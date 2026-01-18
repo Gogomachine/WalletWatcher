@@ -121,3 +121,18 @@ def get_notifications_keyboard(enabled: bool) -> InlineKeyboardMarkup:
     ]
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_track_address_keyboard(address: str) -> InlineKeyboardMarkup:
+    """Get keyboard with track address button.
+
+    Args:
+        address: Address to track
+
+    Returns:
+        Inline keyboard with track button
+    """
+    buttons = [
+        [InlineKeyboardButton(text="➕ Отслеживать этот адрес", callback_data=f"track_{address}")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

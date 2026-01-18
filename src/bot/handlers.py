@@ -15,7 +15,8 @@ from .keyboards import (
     get_notifications_keyboard,
     get_cancel_keyboard,
     get_skip_keyboard,
-    get_tier_discovery_keyboard
+    get_tier_discovery_keyboard,
+    get_track_address_keyboard
 )
 from ..blockchain.universal_client import UniversalBlockchainClient, detect_address_type
 from ..database.db import Database
@@ -245,7 +246,12 @@ async def discover_and_show_tier(message: Message, tier: str, tier_name: str, em
     msg = f"🎯 <b>Найден случайный {tier_name}!</b>\n\n"
     msg += format_wallet_info(info)
 
-    await status_msg.edit_text(msg, disable_web_page_preview=True, parse_mode="HTML")
+    await status_msg.edit_text(
+        msg,
+        disable_web_page_preview=True,
+        parse_mode="HTML",
+        reply_markup=get_track_address_keyboard(address)
+    )
 
 
 @router.message(Command("whale"))
@@ -604,13 +610,44 @@ async def discover_and_show_tier_callback(callback: CallbackQuery, tier: str, ti
     msg = f"🎯 <b>Найден случайный {tier_name}!</b>\n\n"
     msg += format_wallet_info(info)
 
-    await callback.message.edit_text(msg, disable_web_page_preview=True, parse_mode="HTML")
+    await callback.message.edit_text(
+        msg,
+        disable_web_page_preview=True,
+        parse_mode="HTML",
+        reply_markup=get_track_address_keyboard(address)
+    )
 
 
 @router.callback_query(F.data == "discover_whale")
 async def discover_whale_callback(callback: CallbackQuery):
     """Handle discover whale button."""
     await discover_and_show_tier_callback(callback, "whale", "Whale", "🐳")
+
+
+@router.callback_query(F.data.startswith("track_"))
+async def track_address_callback(callback: CallbackQuery):
+    """Handle track address button from whale discovery."""
+    address = callback.data.split("_", 1)[1]
+
+    # Add address to tracking
+    success = await database.add_tracked_address(
+        callback.from_user.id,
+        address,
+        None
+    )
+
+    if success:
+        await callback.answer(
+            "✅ Адрес добавлен в отслеживание!",
+            show_alert=True
+        )
+        # Update the message to remove the button
+        await callback.message.edit_reply_markup(reply_markup=None)
+    else:
+        await callback.answer(
+            "❌ Этот адрес уже отслеживается",
+            show_alert=True
+        )
 
 
 async def show_settings(message: Message):

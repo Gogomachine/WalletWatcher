@@ -287,6 +287,8 @@ class SolanaClient:
                     "DhzDDB92TDj3LCSqHxZ72gVMVfVsLqkuN5bDCDa5h7oE",  # Kraken
                     "CuieVDEDtLo7FypA9SbLM9saXFdb1dsshEkyErMqkRQq",  # FTX cold wallet
                     "GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE",  # Magic Eden
+                    "2ojv9BAiHUrvsm9gxDe7fJSzbNZSJcxZvf8dqmWGHG8S",  # Raydium
+                    "7YttLkHDoNj9wyDur5pM1ejNaAvT9X4eqaYcHQqtj2G5",  # Serum DEX
                 ]
 
                 for address in known_large_addresses:
@@ -361,8 +363,8 @@ class SolanaClient:
             addresses_list = list(addresses_to_check)
             random.shuffle(addresses_list)
 
-            # Check addresses and collect ALL matches
-            max_checks = min(50, len(addresses_list))
+            # Check addresses and collect ALL matches (increased limit for more variety)
+            max_checks = min(100, len(addresses_list))
 
             for address in addresses_list[:max_checks]:
                 try:
