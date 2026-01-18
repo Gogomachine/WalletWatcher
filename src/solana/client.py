@@ -100,6 +100,53 @@ class SolanaClient:
             print(f"Error getting balance for {address}: {e}")
             return None
 
+    async def get_token_accounts(self, address: str) -> List[Dict]:
+        """Get all SPL token accounts for an address.
+
+        Args:
+            address: Solana address
+
+        Returns:
+            List of token accounts with balances
+        """
+        try:
+            from solders.rpc.requests import GetTokenAccountsByOwner
+            from solders.rpc.config import RpcTokenAccountsFilterMint
+            from solana.rpc.types import TokenAccountOpts
+
+            pubkey = Pubkey.from_string(address)
+
+            # Get token accounts
+            opts = TokenAccountOpts(encoding="jsonParsed")
+            response = await self.client.get_token_accounts_by_owner(
+                pubkey,
+                opts=opts
+            )
+
+            if not response.value:
+                return []
+
+            tokens = []
+            for account in response.value:
+                parsed_data = account.account.data.parsed
+                if isinstance(parsed_data, dict) and 'info' in parsed_data:
+                    info = parsed_data['info']
+                    token_amount = info.get('tokenAmount', {})
+
+                    # Only include tokens with non-zero balance
+                    amount = float(token_amount.get('uiAmount', 0))
+                    if amount > 0:
+                        tokens.append({
+                            'mint': info.get('mint'),
+                            'amount': amount,
+                            'decimals': token_amount.get('decimals', 0)
+                        })
+
+            return tokens
+        except Exception as e:
+            print(f"Error getting token accounts for {address}: {e}")
+            return []
+
     async def get_transaction_signatures(
         self,
         address: str,
@@ -307,10 +354,11 @@ class SolanaClient:
             return {"error": "Invalid Solana address"}
 
         # Get all info in parallel
-        balance, wallet_age, last_tx = await asyncio.gather(
+        balance, wallet_age, last_tx, tokens = await asyncio.gather(
             self.get_balance(address),
             self.get_wallet_age(address),
             self.get_last_transaction(address),
+            self.get_token_accounts(address),
             return_exceptions=True
         )
 
@@ -327,6 +375,7 @@ class SolanaClient:
             "is_exchange": exchange is not None,
             "exchange_name": exchange,
             "balance": balance,
+            "tokens": tokens if isinstance(tokens, list) else [],
             "wallet_age": wallet_age,
             "last_transaction": last_tx,
             "whale_tier": whale_tier,

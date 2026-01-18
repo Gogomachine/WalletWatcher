@@ -15,7 +15,7 @@ def get_main_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="➕ Добавить адрес", callback_data="menu_add"),
             InlineKeyboardButton(text="📋 Мои адреса", callback_data="menu_list")
         ],
-        [InlineKeyboardButton(text="🐳 Найти кита", callback_data="menu_whale")],
+        [InlineKeyboardButton(text="🎣 Порыбачить", callback_data="menu_whale")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu_settings")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -105,6 +105,22 @@ def get_notifications_keyboard(enabled: bool) -> InlineKeyboardMarkup:
 
     buttons = [
         [InlineKeyboardButton(text=button_text, callback_data="toggle_notifications")],
+    ]
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_whale_result_keyboard(address: str) -> InlineKeyboardMarkup:
+    """Get keyboard for whale discovery result.
+
+    Args:
+        address: Solana address that was discovered
+
+    Returns:
+        Inline keyboard with add to favorites button
+    """
+    buttons = [
+        [InlineKeyboardButton(text="⭐ Добавить в избранное", callback_data=f"fav_add_{address}")],
     ]
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
