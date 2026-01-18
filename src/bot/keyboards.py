@@ -1,6 +1,6 @@
 """Keyboard layouts for the bot."""
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 
 def get_main_menu() -> InlineKeyboardMarkup:
@@ -15,7 +15,7 @@ def get_main_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="➕ Добавить адрес", callback_data="menu_add"),
             InlineKeyboardButton(text="📋 Мои адреса", callback_data="menu_list")
         ],
-        [InlineKeyboardButton(text="🐳 Найти кита", callback_data="menu_whale")],
+        [InlineKeyboardButton(text="🎣 Порыбачить", callback_data="menu_whale")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu_settings")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -108,3 +108,36 @@ def get_notifications_keyboard(enabled: bool) -> InlineKeyboardMarkup:
     ]
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_whale_result_keyboard(address: str) -> InlineKeyboardMarkup:
+    """Get keyboard for whale discovery result.
+
+    Args:
+        address: Solana address that was discovered
+
+    Returns:
+        Inline keyboard with add to favorites button
+    """
+    buttons = [
+        [InlineKeyboardButton(text="⭐ Добавить в избранное", callback_data=f"fav_add_{address}")],
+    ]
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_persistent_keyboard() -> ReplyKeyboardMarkup:
+    """Get persistent reply keyboard shown at the bottom of the chat.
+
+    Returns:
+        Reply keyboard with main menu button
+    """
+    buttons = [
+        [KeyboardButton(text="📱 Главное меню")],
+    ]
+
+    return ReplyKeyboardMarkup(
+        keyboard=buttons,
+        resize_keyboard=True,
+        persistent=True
+    )
