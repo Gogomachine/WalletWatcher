@@ -110,41 +110,48 @@ class SolanaClient:
             List of token accounts with balances
         """
         try:
-            from solders.rpc.requests import GetTokenAccountsByOwner
-            from solders.rpc.config import RpcTokenAccountsFilterMint
-            from solana.rpc.types import TokenAccountOpts
-
             pubkey = Pubkey.from_string(address)
 
-            # Get token accounts
-            opts = TokenAccountOpts(encoding="jsonParsed")
-            response = await self.client.get_token_accounts_by_owner(
+            # Token Program ID for SPL tokens
+            token_program_id = Pubkey.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+
+            # Get token accounts owned by this address
+            response = await self.client.get_token_accounts_by_owner_json_parsed(
                 pubkey,
-                opts=opts
+                {"programId": str(token_program_id)},
+                commitment=Confirmed
             )
 
             if not response.value:
                 return []
 
             tokens = []
-            for account in response.value:
-                parsed_data = account.account.data.parsed
-                if isinstance(parsed_data, dict) and 'info' in parsed_data:
-                    info = parsed_data['info']
-                    token_amount = info.get('tokenAmount', {})
+            for account_info in response.value:
+                try:
+                    account_data = account_info.account.data
+                    if hasattr(account_data, 'parsed'):
+                        parsed = account_data.parsed
+                        if isinstance(parsed, dict) and 'info' in parsed:
+                            info = parsed['info']
+                            token_amount = info.get('tokenAmount', {})
 
-                    # Only include tokens with non-zero balance
-                    amount = float(token_amount.get('uiAmount', 0))
-                    if amount > 0:
-                        tokens.append({
-                            'mint': info.get('mint'),
-                            'amount': amount,
-                            'decimals': token_amount.get('decimals', 0)
-                        })
+                            # Only include tokens with non-zero balance
+                            ui_amount = token_amount.get('uiAmount')
+                            if ui_amount and float(ui_amount) > 0:
+                                tokens.append({
+                                    'mint': info.get('mint'),
+                                    'amount': float(ui_amount),
+                                    'decimals': token_amount.get('decimals', 0)
+                                })
+                except Exception as e:
+                    print(f"Error parsing token account: {e}")
+                    continue
 
             return tokens
         except Exception as e:
             print(f"Error getting token accounts for {address}: {e}")
+            import traceback
+            traceback.print_exc()
             return []
 
     async def get_transaction_signatures(
