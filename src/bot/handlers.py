@@ -743,12 +743,6 @@ def format_wallet_info(info: dict) -> str:
     balance = info.get('balance')
     wallet_age = info.get('wallet_age')
     last_tx = info.get('last_transaction')
-    is_exchange = info.get('is_exchange')
-    exchange_name = info.get('exchange_name')
-    whale_tier = info.get('whale_tier')
-
-    # Get network info
-    network_name = info.get('network_name', 'Unknown')
     symbol = info.get('symbol', '')
     explorer_base = info.get('explorer', 'https://solscan.io')
 
@@ -758,46 +752,37 @@ def format_wallet_info(info: dict) -> str:
     else:  # Solana
         address_explorer_url = f"{explorer_base}/account/{address}"
 
-    msg = f"📊 <b>Информация об адресе</b>\n\n"
-
-    # Network name
-    msg += f"🌐 <b>Сеть:</b> {network_name}\n"
-
-    # Address with link
-    msg += f"📍 <a href='{address_explorer_url}'><b>{address[:8]}...{address[-6:]}</b></a>\n\n"
-
-    # Exchange status
-    if is_exchange:
-        msg += f"🏦 <b>Биржа:</b> {exchange_name} ✅\n\n"
-
-    # Whale tier status
-    if whale_tier:
-        msg += f"{whale_tier['emoji']} <b>Статус:</b> {whale_tier['name']}\n\n"
+    # Address with link in brackets
+    msg = f"📍 {address[:8]}...{address[-6:]} ({address_explorer_url})\n"
 
     # Balance in SOL (native token)
     if balance is not None:
-        msg += f"💰 <b>Баланс:</b> {balance:.4f} {symbol}\n\n"
+        msg += f"💰 Баланс: {balance:.4f} {symbol}\n"
     else:
-        msg += f"💰 <b>Баланс:</b> Недоступен\n\n"
+        msg += f"💰 Баланс: Недоступен\n"
 
     # Token balances (SPL tokens) - show count only
     tokens = info.get('tokens', [])
     if tokens:
-        msg += f"🪙 <b>Токены:</b> {len(tokens)}\n\n"
+        msg += f"🪙 Токены: {len(tokens)}\n"
+
+    msg += "\n"
 
     # Wallet age (возраст кошелька)
     if wallet_age:
-        msg += f"🗓️ <b>Возраст кошелька:</b> {wallet_age['formatted']}\n"
+        msg += f"🗓 Возраст кошелька: {wallet_age['formatted']}\n"
         if wallet_age.get('first_transaction_date'):
             first_date = wallet_age['first_transaction_date'].strftime('%d.%m.%Y')
-            msg += f"📅 <b>С:</b> {first_date}\n\n"
+            msg += f"📅 С: {first_date}\n"
     else:
-        msg += f"🗓️ <b>Возраст кошелька:</b> Нет транзакций\n\n"
+        msg += f"🗓 Возраст кошелька: Нет транзакций\n"
+
+    msg += "\n"
 
     # Last transaction
     if last_tx and last_tx.get('timestamp'):
-        msg += f"🔄 <b>Последняя транзакция:</b>\n"
+        msg += f"🔄 Последняя транзакция:\n"
         msg += f"⏰ {last_tx['timestamp'].strftime('%d.%m.%Y %H:%M:%S')}\n"
-        msg += f"🔗 <a href='{last_tx['explorer_url']}'>Посмотреть в эксплорере</a>\n"
+        msg += f"🔗 Посмотреть в эксплорере ({last_tx['explorer_url']})\n"
 
     return msg
