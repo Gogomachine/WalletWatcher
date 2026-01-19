@@ -43,9 +43,9 @@ class SolscanScreenshot:
         try:
             await self.init_browser()
 
-            # Create new page
+            # Create new page with fixed viewport
             page = await self.browser.new_page(
-                viewport={'width': 600, 'height': 800}
+                viewport={'width': 600, 'height': 1000}
             )
 
             # Navigate to Solscan account page
@@ -58,27 +58,46 @@ class SolscanScreenshot:
             # Give it a moment for all data to populate
             await asyncio.sleep(3)
 
-            # Find the Overview card by looking for the parent container
-            # that contains both "Overview" and "Total Value"
-            # Use XPath for more reliable element finding
-            overview_element = page.locator('xpath=//div[contains(., "Overview") and contains(., "Total Value")][1]')
+            # Find the Overview element and get its bounding box
+            # Try to find the parent container of "Total Value"
+            total_value_locator = page.locator('text=Total Value').first
 
-            # Check if element exists, if not try alternative selectors
-            try:
-                await overview_element.wait_for(timeout=5000)
-            except:
-                # Fallback: Find by bounding box - look for container with specific height/structure
+            # Get the parent div that contains the whole Overview card
+            # Navigate up the DOM tree to find the card container
+            parent_levels = [2, 3, 4, 5, 6]  # Try different levels
+            overview_box = None
+
+            for level in parent_levels:
                 try:
-                    overview_element = page.locator('text=Total Value').locator('..').locator('..')
+                    parent_locator = total_value_locator.locator(f'xpath=ancestor::div[{level}]')
+                    box = await parent_locator.bounding_box()
+                    if box and box['height'] > 200 and box['height'] < 500:
+                        # Found a reasonable sized container
+                        overview_box = box
+                        print(f"✓ Found Overview at level {level}: {box}")
+                        break
                 except:
-                    # Last resort: just capture the area containing Total Value
-                    overview_element = page.locator('text=Total Value').locator('..')
+                    continue
 
             # Save screenshot
             screenshot_path = self.screenshot_dir / f"{address[:8]}.png"
 
-            # Take screenshot of the overview element
-            await overview_element.screenshot(path=str(screenshot_path), timeout=10000)
+            if overview_box:
+                # Take screenshot of the specific area
+                await page.screenshot(
+                    path=str(screenshot_path),
+                    clip={
+                        'x': overview_box['x'],
+                        'y': overview_box['y'],
+                        'width': overview_box['width'],
+                        'height': overview_box['height']
+                    }
+                )
+            else:
+                # Fallback: just screenshot the first element directly
+                print("⚠ Could not find bounding box, using element screenshot")
+                parent_locator = total_value_locator.locator('xpath=ancestor::div[3]')
+                await parent_locator.screenshot(path=str(screenshot_path))
 
             await page.close()
 
