@@ -71,7 +71,8 @@ class SolscanScreenshot:
                 try:
                     parent_locator = total_value_locator.locator(f'xpath=ancestor::div[{level}]')
                     box = await parent_locator.bounding_box()
-                    if box and box['height'] > 200 and box['height'] < 500:
+                    # Accept any reasonable sized container (removed upper limit for wallets without tokens)
+                    if box and box['height'] > 150 and box['height'] < 600:
                         # Found a reasonable sized container
                         overview_box = box
                         print(f"✓ Found Overview at level {level}: {box}")
@@ -95,10 +96,28 @@ class SolscanScreenshot:
                     }
                 )
             else:
-                # Fallback: just screenshot the first element directly
-                print("⚠ Could not find bounding box, using element screenshot")
-                parent_locator = total_value_locator.locator('xpath=ancestor::div[3]')
-                await parent_locator.screenshot(path=str(screenshot_path))
+                # Fallback: try to find any parent with the Overview content
+                print("⚠ Could not find bounding box with size constraints, trying fallback")
+                # Try level 4 first (most common), then others
+                for level in [4, 5, 3, 6]:
+                    try:
+                        parent_locator = total_value_locator.locator(f'xpath=ancestor::div[{level}]')
+                        box = await parent_locator.bounding_box()
+                        if box:
+                            print(f"✓ Fallback: using level {level} with box: {box}")
+                            await page.screenshot(
+                                path=str(screenshot_path),
+                                clip={
+                                    'x': max(0, box['x'] - 15),
+                                    'y': max(0, box['y'] - 15),
+                                    'width': box['width'] + 30,
+                                    'height': box['height'] + 30
+                                }
+                            )
+                            break
+                    except Exception as e:
+                        print(f"Fallback level {level} failed: {e}")
+                        continue
 
             await page.close()
 
