@@ -109,16 +109,15 @@ async def cmd_help(message: Message):
         "/check <адрес> - Проверить адрес\n"
         "/track <адрес> - Добавить адрес в отслеживание\n"
         "/list - Мои отслеживаемые адреса\n"
-        "/whale - Порыбачить (случайный адрес)\n"
+        "/whale - Подсмотреть (случайный адрес)\n"
         "/settings - Настройки\n\n"
         "<b>Получение информации:</b>\n"
         "Просто отправьте Solana адрес, и я покажу всю информацию о нём:\n"
         "• Баланс в SOL\n"
-        "• Статус кошелька (Whale/Dolphin/Fish/Shrimp)\n"
         "• Возраст кошелька\n"
         "• Последняя транзакция\n"
-        "• Является ли адрес биржевым\n\n"
-        "<b>🎣 Порыбачить:</b>\n"
+        "• Статус активности (Активный/Засыпающий/Спящий)\n\n"
+        "<b>👀 Подсмотреть:</b>\n"
         "Команда /whale выбирает случайный адрес из списка. "
         "Можете добавить его в избранное для отслеживания!\n\n"
         "<b>Отслеживание:</b>\n"
@@ -170,24 +169,24 @@ async def text_tracking_button(message: Message):
         )
 
 
-@router.message(F.text == "🎣 Порыбачить")
+@router.message(F.text == "👀 Подсмотреть")
 async def text_whale_button(message: Message):
-    """Handle 'Fishing' button press."""
-    status_msg = await message.answer("🎣 Случайный улов...")
+    """Handle 'Peek' button press."""
+    status_msg = await message.answer("👀 Подсматриваю...")
 
     # Discover random whale address
     address = await blockchain_client.discover_whale_address(min_balance_usd=100000)
 
     if not address:
         await status_msg.edit_text(
-            "❌ <b>Улов не удался</b>\n\n"
+            "❌ <b>Не удалось подсмотреть</b>\n\n"
             "Попробуйте позже.",
             parse_mode="HTML"
         )
         return
 
     # Get wallet info
-    await status_msg.edit_text("🎣 Поймали! Получаю информацию...")
+    await status_msg.edit_text("👀 Получаю информацию...")
     info = await blockchain_client.get_wallet_info(address)
 
     if "error" in info:
@@ -198,7 +197,7 @@ async def text_whale_button(message: Message):
         return
 
     # Format wallet info
-    msg = "🎣 <b>Случайный улов!</b>\n\n"
+    msg = "👀 <b>Подсмотрел!</b>\n\n"
     msg += format_wallet_info(info)
 
     # Try to get screenshot from Solscan
@@ -320,22 +319,22 @@ async def cmd_settings(message: Message):
 
 @router.message(Command("whale"))
 async def cmd_whale(message: Message):
-    """Handle /whale command - discover random whale address."""
-    status_msg = await message.reply("🎣 Случайный улов...")
+    """Handle /whale command - peek at random whale address."""
+    status_msg = await message.reply("👀 Подсматриваю...")
 
     # Discover random whale address (min $100,000 balance)
     address = await blockchain_client.discover_whale_address(min_balance_usd=100000)
 
     if not address:
         await status_msg.edit_text(
-            "❌ <b>Улов не удался</b>\n\n"
+            "❌ <b>Не удалось подсмотреть</b>\n\n"
             "Попробуйте позже.",
             parse_mode="HTML"
         )
         return
 
     # Get wallet info
-    await status_msg.edit_text("🎣 Поймали! Получаю информацию...")
+    await status_msg.edit_text("👀 Получаю информацию...")
     info = await blockchain_client.get_wallet_info(address)
 
     if "error" in info:
@@ -346,7 +345,7 @@ async def cmd_whale(message: Message):
         return
 
     # Format wallet info
-    msg = "🎣 <b>Случайный улов!</b>\n\n"
+    msg = "👀 <b>Подсмотрел!</b>\n\n"
     msg += format_wallet_info(info)
 
     # Try to get screenshot from Solscan
@@ -441,8 +440,8 @@ async def menu_settings_callback(callback: CallbackQuery):
 
 @router.callback_query(F.data == "menu_whale")
 async def menu_whale_callback(callback: CallbackQuery):
-    """Handle 'Find whale' menu button."""
-    await callback.message.edit_text("🎣 Случайный улов...")
+    """Handle 'Peek' menu button."""
+    await callback.message.edit_text("👀 Подсматриваю...")
     await callback.answer()
 
     # Discover random whale address (min $100,000 balance)
@@ -450,7 +449,7 @@ async def menu_whale_callback(callback: CallbackQuery):
 
     if not address:
         await callback.message.edit_text(
-            "❌ <b>Улов не удался</b>\n\n"
+            "❌ <b>Не удалось подсмотреть</b>\n\n"
             "Попробуйте позже.",
             reply_markup=get_main_menu(),
             parse_mode="HTML"
@@ -458,7 +457,7 @@ async def menu_whale_callback(callback: CallbackQuery):
         return
 
     # Get wallet info
-    await callback.message.edit_text("🎣 Поймали! Получаю информацию...")
+    await callback.message.edit_text("👀 Получаю информацию...")
     info = await blockchain_client.get_wallet_info(address)
 
     if "error" in info:
@@ -470,7 +469,7 @@ async def menu_whale_callback(callback: CallbackQuery):
         return
 
     # Format wallet info
-    msg = "🎣 <b>Случайный улов!</b>\n\n"
+    msg = "👀 <b>Подсмотрел!</b>\n\n"
     msg += format_wallet_info(info)
 
     # Try to get screenshot from Solscan
@@ -915,11 +914,6 @@ def format_wallet_info(info: dict) -> str:
     else:
         msg += f"💰 Баланс: Недоступен\n"
 
-    # Token balances (SPL tokens) - show count only
-    tokens = info.get('tokens', [])
-    if tokens:
-        msg += f"🪙 Токены: {len(tokens)}\n"
-
     msg += "\n"
 
     # Wallet age (возраст кошелька)
@@ -933,10 +927,25 @@ def format_wallet_info(info: dict) -> str:
 
     msg += "\n"
 
-    # Last transaction
+    # Last transaction and activity status
     if last_tx and last_tx.get('timestamp'):
         msg += f"🔄 Последняя транзакция:\n"
         msg += f"⏰ {last_tx['timestamp'].strftime('%d.%m.%Y %H:%M:%S')}\n"
-        msg += f"🔗 <a href='{last_tx['explorer_url']}'>Посмотреть в эксплорере</a>\n"
+        msg += f"🔗 <a href='{last_tx['explorer_url']}'>Посмотреть в эксплорере</a>\n\n"
+
+        # Calculate activity status based on last transaction time
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        last_tx_time = last_tx['timestamp']
+        time_diff = now - last_tx_time
+
+        if time_diff <= timedelta(days=30):  # Last month
+            activity_status = "🟢 Активный"
+        elif time_diff <= timedelta(days=180):  # 30 days to 6 months
+            activity_status = "🟡 Засыпающий"
+        else:  # More than 6 months
+            activity_status = "🔴 Спящий"
+
+        msg += f"📊 Статус: {activity_status}\n"
 
     return msg
