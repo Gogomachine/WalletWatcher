@@ -2,9 +2,10 @@
 
 import os
 import re
+from pathlib import Path
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ChatType
@@ -20,6 +21,7 @@ from .keyboards import (
 )
 from ..blockchain.universal_client import UniversalBlockchainClient, detect_address_type
 from ..database.db import Database
+from ..utils.screenshot import take_solscan_screenshot
 
 
 router = Router()
@@ -195,16 +197,38 @@ async def text_whale_button(message: Message):
         )
         return
 
-    # Format and send wallet info
+    # Format wallet info
     msg = "🎣 <b>Случайный улов!</b>\n\n"
     msg += format_wallet_info(info)
 
-    await status_msg.edit_text(
-        msg,
-        disable_web_page_preview=True,
-        parse_mode="HTML",
-        reply_markup=get_whale_result_keyboard(address)
-    )
+    # Try to get screenshot from Solscan
+    await status_msg.edit_text("📸 Создаю скриншот Solscan...")
+    screenshot_path = await take_solscan_screenshot(address)
+
+    if screenshot_path and Path(screenshot_path).exists():
+        # Send photo with caption and favorite button
+        photo = FSInputFile(screenshot_path)
+        await message.answer_photo(
+            photo=photo,
+            caption=msg,
+            parse_mode="HTML",
+            reply_markup=get_whale_result_keyboard(address)
+        )
+        await status_msg.delete()
+
+        # Clean up screenshot file
+        try:
+            Path(screenshot_path).unlink()
+        except:
+            pass
+    else:
+        # Fallback to text only if screenshot failed
+        await status_msg.edit_text(
+            msg,
+            disable_web_page_preview=True,
+            parse_mode="HTML",
+            reply_markup=get_whale_result_keyboard(address)
+        )
 
 
 @router.message(F.text == "⚙️ Настройки")
@@ -321,16 +345,38 @@ async def cmd_whale(message: Message):
         )
         return
 
-    # Format and send wallet info
+    # Format wallet info
     msg = "🎣 <b>Случайный улов!</b>\n\n"
     msg += format_wallet_info(info)
 
-    await status_msg.edit_text(
-        msg,
-        disable_web_page_preview=True,
-        parse_mode="HTML",
-        reply_markup=get_whale_result_keyboard(address)
-    )
+    # Try to get screenshot from Solscan
+    await status_msg.edit_text("📸 Создаю скриншот Solscan...")
+    screenshot_path = await take_solscan_screenshot(address)
+
+    if screenshot_path and Path(screenshot_path).exists():
+        # Send photo with caption and favorite button
+        photo = FSInputFile(screenshot_path)
+        await message.answer_photo(
+            photo=photo,
+            caption=msg,
+            parse_mode="HTML",
+            reply_markup=get_whale_result_keyboard(address)
+        )
+        await status_msg.delete()
+
+        # Clean up screenshot file
+        try:
+            Path(screenshot_path).unlink()
+        except:
+            pass
+    else:
+        # Fallback to text only if screenshot failed
+        await status_msg.edit_text(
+            msg,
+            disable_web_page_preview=True,
+            parse_mode="HTML",
+            reply_markup=get_whale_result_keyboard(address)
+        )
 
 
 # Callback handlers для inline кнопок
@@ -423,16 +469,38 @@ async def menu_whale_callback(callback: CallbackQuery):
         )
         return
 
-    # Format and send wallet info
+    # Format wallet info
     msg = "🎣 <b>Случайный улов!</b>\n\n"
     msg += format_wallet_info(info)
 
-    await callback.message.edit_text(
-        msg,
-        disable_web_page_preview=True,
-        parse_mode="HTML",
-        reply_markup=get_whale_result_keyboard(address)
-    )
+    # Try to get screenshot from Solscan
+    await callback.message.edit_text("📸 Создаю скриншот Solscan...")
+    screenshot_path = await take_solscan_screenshot(address)
+
+    if screenshot_path and Path(screenshot_path).exists():
+        # Delete status message and send photo with caption
+        await callback.message.delete()
+        photo = FSInputFile(screenshot_path)
+        await callback.message.answer_photo(
+            photo=photo,
+            caption=msg,
+            parse_mode="HTML",
+            reply_markup=get_whale_result_keyboard(address)
+        )
+
+        # Clean up screenshot file
+        try:
+            Path(screenshot_path).unlink()
+        except:
+            pass
+    else:
+        # Fallback to text only if screenshot failed
+        await callback.message.edit_text(
+            msg,
+            disable_web_page_preview=True,
+            parse_mode="HTML",
+            reply_markup=get_whale_result_keyboard(address)
+        )
 
 
 @router.callback_query(F.data == "cancel")
@@ -494,12 +562,12 @@ async def process_address(message: Message, state: FSMContext):
         )
         return
 
-    await message.reply("⏳ Получаю информацию...")
+    status_msg = await message.reply("⏳ Получаю информацию...")
 
     info = await blockchain_client.get_wallet_info(address)
 
     if "error" in info:
-        await message.reply(
+        await status_msg.edit_text(
             f"❌ Ошибка: {info['error']}\n\n"
             "Убедитесь, что вы отправили корректный Solana адрес."
         )
@@ -509,20 +577,61 @@ async def process_address(message: Message, state: FSMContext):
     # Форматирование сообщения
     msg = format_wallet_info(info)
 
+    # Try to get screenshot from Solscan
+    await status_msg.edit_text("📸 Создаю скриншот Solscan...")
+    screenshot_path = await take_solscan_screenshot(address)
+
     # Проверяем, добавляем ли адрес в отслеживание
     data = await state.get_data()
     if data.get('adding_to_tracking'):
         # Сохраняем адрес и спрашиваем никнейм
         await state.update_data(address=address)
         await state.set_state(AddressStates.waiting_for_nickname)
-        await message.reply(msg, disable_web_page_preview=True, parse_mode="HTML")
+
+        if screenshot_path and Path(screenshot_path).exists():
+            # Send photo with caption
+            photo = FSInputFile(screenshot_path)
+            await message.answer_photo(
+                photo=photo,
+                caption=msg,
+                parse_mode="HTML"
+            )
+            await status_msg.delete()
+
+            # Clean up screenshot file
+            try:
+                Path(screenshot_path).unlink()
+            except:
+                pass
+        else:
+            # Fallback to text only
+            await status_msg.edit_text(msg, disable_web_page_preview=True, parse_mode="HTML")
+
         await message.reply(
             "✏️ Хотите задать никнейм для этого адреса?\n\n"
             "Отправьте никнейм или нажмите 'Пропустить':",
             reply_markup=get_skip_keyboard()
         )
     else:
-        await message.reply(msg, disable_web_page_preview=True, parse_mode="HTML")
+        if screenshot_path and Path(screenshot_path).exists():
+            # Send photo with caption
+            photo = FSInputFile(screenshot_path)
+            await message.answer_photo(
+                photo=photo,
+                caption=msg,
+                parse_mode="HTML"
+            )
+            await status_msg.delete()
+
+            # Clean up screenshot file
+            try:
+                Path(screenshot_path).unlink()
+            except:
+                pass
+        else:
+            # Fallback to text only
+            await status_msg.edit_text(msg, disable_web_page_preview=True, parse_mode="HTML")
+
         await state.clear()
 
 
@@ -577,16 +686,39 @@ async def check_address(message: Message, address: str):
         message: Message object
         address: Solana address
     """
-    await message.reply("⏳ Получаю информацию...")
+    status_msg = await message.reply("⏳ Получаю информацию...")
 
     info = await blockchain_client.get_wallet_info(address)
 
     if "error" in info:
-        await message.reply(f"❌ Ошибка: {info['error']}")
+        await status_msg.edit_text(f"❌ Ошибка: {info['error']}")
         return
 
+    # Format text info
     msg = format_wallet_info(info)
-    await message.reply(msg, disable_web_page_preview=True, parse_mode="HTML")
+
+    # Try to get screenshot from Solscan
+    await status_msg.edit_text("📸 Создаю скриншот Solscan...")
+    screenshot_path = await take_solscan_screenshot(address)
+
+    if screenshot_path and Path(screenshot_path).exists():
+        # Send photo with caption
+        photo = FSInputFile(screenshot_path)
+        await message.answer_photo(
+            photo=photo,
+            caption=msg,
+            parse_mode="HTML"
+        )
+        await status_msg.delete()
+
+        # Clean up screenshot file
+        try:
+            Path(screenshot_path).unlink()
+        except:
+            pass
+    else:
+        # Fallback to text only if screenshot failed
+        await status_msg.edit_text(msg, disable_web_page_preview=True, parse_mode="HTML")
 
 
 # Address management callbacks
@@ -634,7 +766,29 @@ async def check_address_callback(callback: CallbackQuery):
     info = await blockchain_client.get_wallet_info(address)
     msg = format_wallet_info(info)
 
-    await callback.message.edit_text(msg, disable_web_page_preview=True, parse_mode="HTML")
+    # Try to get screenshot from Solscan
+    await callback.message.edit_text("📸 Создаю скриншот Solscan...")
+    screenshot_path = await take_solscan_screenshot(address)
+
+    if screenshot_path and Path(screenshot_path).exists():
+        # Delete status message and send photo with caption
+        await callback.message.delete()
+        photo = FSInputFile(screenshot_path)
+        await callback.message.answer_photo(
+            photo=photo,
+            caption=msg,
+            parse_mode="HTML"
+        )
+
+        # Clean up screenshot file
+        try:
+            Path(screenshot_path).unlink()
+        except:
+            pass
+    else:
+        # Fallback to text only if screenshot failed
+        await callback.message.edit_text(msg, disable_web_page_preview=True, parse_mode="HTML")
+
     await callback.answer()
 
 
