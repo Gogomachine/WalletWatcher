@@ -782,7 +782,9 @@ def format_wallet_info(info: dict) -> str:
 
     # Token balances (SPL tokens)
     tokens = info.get('tokens', [])
+    print(f"🔍 DEBUG: Found {len(tokens)} tokens in wallet info")
     if tokens:
+        print(f"🔍 DEBUG: First token: {tokens[0]}")
         msg += f"🪙 <b>Токены ({len(tokens)}):</b>\n"
         for token in tokens[:10]:  # Show max 10 tokens
             mint = token.get('mint', '')
@@ -797,14 +799,19 @@ def format_wallet_info(info: dict) -> str:
                     token_display += f" ({name})"
             else:
                 # Show shortened mint address if no symbol
-                mint_short = f"{mint[:8]}...{mint[-4:]}"
-                token_display = f"<code>{mint_short}</code>"
+                if mint and len(mint) > 12:
+                    mint_short = f"{mint[:8]}...{mint[-4:]}"
+                    token_display = f"<code>{mint_short}</code>"
+                else:
+                    token_display = f"<code>{mint}</code>"
 
-            msg += f"  • {amount:,.2f} {token_display}\n"
+            msg += f"  • {amount:,.4f} {token_display}\n"
 
         if len(tokens) > 10:
             msg += f"  ... и ещё {len(tokens) - 10}\n"
         msg += "\n"
+    else:
+        print(f"⚠️  DEBUG: No tokens found in wallet info")
 
     # Wallet age (возраст кошелька)
     if wallet_age:

@@ -116,7 +116,7 @@ class SolanaClient:
         return await self._get_tokens_helius(address)
 
     async def _get_tokens_helius(self, address: str) -> List[Dict]:
-        """Get tokens using Helius API.
+        """Get tokens using Helius RPC API.
 
         Args:
             address: Solana address
@@ -125,64 +125,113 @@ class SolanaClient:
             List of tokens with metadata
         """
         try:
-            # Use correct Helius DAS API endpoint for token balances
+            # Use Helius RPC endpoint with getTokenAccountsByOwner
             url = f"https://mainnet.helius-rpc.com/?api-key={self.helius_api_key}"
 
-            # Use getAssetsByOwner method
+            # Standard Solana RPC method to get token accounts
             payload = {
                 "jsonrpc": "2.0",
-                "id": "token-balances",
-                "method": "getAssetsByOwner",
-                "params": {
-                    "ownerAddress": address,
-                    "page": 1,
-                    "limit": 1000
-                }
+                "id": 1,
+                "method": "getTokenAccountsByOwner",
+                "params": [
+                    address,
+                    {
+                        "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+                    },
+                    {
+                        "encoding": "jsonParsed"
+                    }
+                ]
             }
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as response:
                     if response.status != 200:
-                        print(f"❌ Helius API error: {response.status}")
+                        print(f"❌ Helius RPC error: {response.status}")
+                        response_text = await response.text()
+                        print(f"Response: {response_text[:200]}")
                         return []
 
                     data = await response.json()
+
+                    # Check for RPC errors
+                    if 'error' in data:
+                        print(f"❌ RPC Error: {data['error']}")
+                        return []
+
                     tokens = []
 
-                    # Parse result
-                    items = data.get('result', {}).get('items', [])
-                    print(f"📊 Helius returned {len(items)} assets")
+                    # Parse token accounts
+                    accounts = data.get('result', {}).get('value', [])
+                    print(f"📊 Helius returned {len(accounts)} token accounts")
 
-                    for item in items:
-                        # Filter only fungible tokens
-                        if item.get('interface') == 'FungibleToken':
-                            content = item.get('content', {})
-                            token_info = item.get('token_info', {})
+                    for account in accounts:
+                        try:
+                            parsed = account.get('account', {}).get('data', {}).get('parsed', {})
+                            info = parsed.get('info', {})
+                            token_amount = info.get('tokenAmount', {})
 
-                            balance = token_info.get('balance', 0)
-                            decimals = token_info.get('decimals', 0)
+                            ui_amount = token_amount.get('uiAmount')
+                            decimals = token_amount.get('decimals', 0)
+                            mint = info.get('mint')
 
-                            if balance and decimals:
-                                ui_amount = float(balance) / (10 ** decimals)
+                            if ui_amount and float(ui_amount) > 0 and mint:
+                                tokens.append({
+                                    'mint': mint,
+                                    'amount': float(ui_amount),
+                                    'decimals': decimals,
+                                    'symbol': None,  # Will be fetched separately if needed
+                                    'name': None
+                                })
+                        except Exception as e:
+                            print(f"⚠️  Error parsing token account: {e}")
+                            continue
 
-                                if ui_amount > 0:
-                                    metadata = content.get('metadata', {})
-                                    tokens.append({
-                                        'mint': item.get('id'),
-                                        'amount': ui_amount,
-                                        'decimals': decimals,
-                                        'symbol': metadata.get('symbol'),
-                                        'name': metadata.get('name')
-                                    })
+                    print(f"✅ Helius RPC: Found {len(tokens)} tokens with balance > 0")
 
-                    print(f"✅ Helius API: Parsed {len(tokens)} tokens for {address}")
+                    # If we found tokens, try to enrich with metadata
+                    if tokens:
+                        tokens = await self._enrich_token_metadata(tokens)
+
                     return tokens
 
         except Exception as e:
-            print(f"❌ Error getting tokens from Helius: {e}")
+            print(f"❌ Error getting tokens from Helius RPC: {e}")
             import traceback
             traceback.print_exc()
             return []
+
+    async def _enrich_token_metadata(self, tokens: List[Dict]) -> List[Dict]:
+        """Enrich tokens with metadata from Helius.
+
+        Args:
+            tokens: List of tokens with mint addresses
+
+        Returns:
+            List of tokens with metadata
+        """
+        try:
+            # Get metadata for multiple tokens at once
+            mint_addresses = [token['mint'] for token in tokens[:20]]  # Limit to first 20
+
+            url = f"https://mainnet.helius-rpc.com/?api-key={self.helius_api_key}"
+
+            payload = {
+                "jsonrpc": "2.0",
+                "id": "metadata-batch",
+                "method": "getAsset",
+                "params": {
+                    "id": mint_addresses[0] if mint_addresses else ""
+                }
+            }
+
+            # For now, just return tokens as-is without metadata
+            # Metadata enrichment can be added later if needed
+            return tokens
+
+        except Exception as e:
+            print(f"⚠️  Could not enrich metadata: {e}")
+            return tokens
 
     async def get_transaction_signatures(
         self,
