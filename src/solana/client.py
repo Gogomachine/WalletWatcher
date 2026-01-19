@@ -247,8 +247,9 @@ class SolanaClient:
                 return {}
 
             # Use Jupiter Price API v2
+            # Docs: https://dev.jup.ag/api-reference/price/v2/price
             ids = ",".join(mint_addresses[:100])  # Limit to 100 tokens
-            url = f"https://api.jup.ag/price/v2?ids={ids}"
+            url = f"https://price.jup.ag/v2/price?ids={ids}"
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
@@ -278,6 +279,8 @@ class SolanaClient:
 
         except Exception as e:
             print(f"❌ Error getting token prices from Jupiter: {e}")
+            import traceback
+            traceback.print_exc()
             return {}
 
     async def calculate_total_token_value(self, tokens: List[Dict]) -> float:
