@@ -125,42 +125,63 @@ class SolanaClient:
             List of tokens with metadata
         """
         try:
-            url = f"{self.helius_base_url}/addresses/{address}/balances"
-            params = {"api-key": self.helius_api_key}
+            # Use correct Helius DAS API endpoint for token balances
+            url = f"https://mainnet.helius-rpc.com/?api-key={self.helius_api_key}"
+
+            # Use getAssetsByOwner method
+            payload = {
+                "jsonrpc": "2.0",
+                "id": "token-balances",
+                "method": "getAssetsByOwner",
+                "params": {
+                    "ownerAddress": address,
+                    "page": 1,
+                    "limit": 1000
+                }
+            }
 
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as response:
                     if response.status != 200:
-                        print(f"Helius API error: {response.status}")
+                        print(f"❌ Helius API error: {response.status}")
                         return []
 
                     data = await response.json()
                     tokens = []
 
-                    # Parse token data from Helius response
-                    token_list = data.get('tokens', [])
-                    for token in token_list:
-                        amount = token.get('amount')
-                        decimals = token.get('decimals', 0)
+                    # Parse result
+                    items = data.get('result', {}).get('items', [])
+                    print(f"📊 Helius returned {len(items)} assets")
 
-                        if amount and decimals:
-                            # Convert to UI amount
-                            ui_amount = float(amount) / (10 ** decimals)
+                    for item in items:
+                        # Filter only fungible tokens
+                        if item.get('interface') == 'FungibleToken':
+                            content = item.get('content', {})
+                            token_info = item.get('token_info', {})
 
-                            if ui_amount > 0:
-                                tokens.append({
-                                    'mint': token.get('mint'),
-                                    'amount': ui_amount,
-                                    'decimals': decimals,
-                                    'symbol': token.get('tokenAccount', {}).get('symbol'),
-                                    'name': token.get('tokenAccount', {}).get('name')
-                                })
+                            balance = token_info.get('balance', 0)
+                            decimals = token_info.get('decimals', 0)
 
-                    print(f"Helius API: Found {len(tokens)} tokens for {address}")
+                            if balance and decimals:
+                                ui_amount = float(balance) / (10 ** decimals)
+
+                                if ui_amount > 0:
+                                    metadata = content.get('metadata', {})
+                                    tokens.append({
+                                        'mint': item.get('id'),
+                                        'amount': ui_amount,
+                                        'decimals': decimals,
+                                        'symbol': metadata.get('symbol'),
+                                        'name': metadata.get('name')
+                                    })
+
+                    print(f"✅ Helius API: Parsed {len(tokens)} tokens for {address}")
                     return tokens
 
         except Exception as e:
-            print(f"Error getting tokens from Helius: {e}")
+            print(f"❌ Error getting tokens from Helius: {e}")
+            import traceback
+            traceback.print_exc()
             return []
 
     async def get_transaction_signatures(

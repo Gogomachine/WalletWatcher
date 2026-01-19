@@ -134,13 +134,83 @@ async def cmd_menu(message: Message):
     )
 
 
-@router.message(F.text == "📱 Главное меню")
-async def text_menu_button(message: Message):
-    """Handle persistent menu button press."""
+@router.message(F.text == "📊 Проверить адрес")
+async def text_check_button(message: Message):
+    """Handle 'Check address' button press."""
     await message.answer(
-        "📱 Главное меню:",
-        reply_markup=get_main_menu()
+        "📊 <b>Проверить адрес</b>\n\n"
+        "Отправьте Solana адрес для проверки:",
+        parse_mode="HTML"
     )
+
+
+@router.message(F.text == "📋 Отслеживание")
+async def text_tracking_button(message: Message):
+    """Handle 'Tracking' button press."""
+    # Show list of tracked addresses
+    addresses = await database.get_user_tracked_addresses(message.from_user.id)
+
+    if not addresses:
+        await message.answer(
+            "📋 <b>Отслеживание</b>\n\n"
+            "У вас пока нет отслеживаемых адресов.\n"
+            "Используйте команду /track или кнопку ➕ в главном меню.",
+            parse_mode="HTML",
+            reply_markup=get_main_menu()
+        )
+    else:
+        keyboard = get_tracked_addresses_keyboard(addresses)
+        await message.answer(
+            f"📋 <b>Ваши отслеживаемые адреса ({len(addresses)}):</b>\n\n"
+            "Нажмите на адрес для управления:",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+
+
+@router.message(F.text == "🎣 Порыбачить")
+async def text_whale_button(message: Message):
+    """Handle 'Fishing' button press."""
+    status_msg = await message.answer("🎣 Случайный улов...")
+
+    # Discover random whale address
+    address = await blockchain_client.discover_whale_address(min_balance_usd=100000)
+
+    if not address:
+        await status_msg.edit_text(
+            "❌ <b>Улов не удался</b>\n\n"
+            "Попробуйте позже.",
+            parse_mode="HTML"
+        )
+        return
+
+    # Get wallet info
+    await status_msg.edit_text("🎣 Поймали! Получаю информацию...")
+    info = await blockchain_client.get_wallet_info(address)
+
+    if "error" in info:
+        await status_msg.edit_text(
+            f"❌ Ошибка при получении информации: {info['error']}",
+            parse_mode="HTML"
+        )
+        return
+
+    # Format and send wallet info
+    msg = "🎣 <b>Случайный улов!</b>\n\n"
+    msg += format_wallet_info(info)
+
+    await status_msg.edit_text(
+        msg,
+        disable_web_page_preview=True,
+        parse_mode="HTML",
+        reply_markup=get_whale_result_keyboard(address)
+    )
+
+
+@router.message(F.text == "⚙️ Настройки")
+async def text_settings_button(message: Message):
+    """Handle 'Settings' button press."""
+    await show_settings(message)
 
 
 @router.message(Command("check"))

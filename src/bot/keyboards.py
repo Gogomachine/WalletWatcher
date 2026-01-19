@@ -130,10 +130,17 @@ def get_persistent_keyboard() -> ReplyKeyboardMarkup:
     """Get persistent reply keyboard shown at the bottom of the chat.
 
     Returns:
-        Reply keyboard with main menu button
+        Reply keyboard with action buttons
     """
     buttons = [
-        [KeyboardButton(text="📱 Главное меню")],
+        [
+            KeyboardButton(text="📊 Проверить адрес"),
+            KeyboardButton(text="📋 Отслеживание")
+        ],
+        [
+            KeyboardButton(text="🎣 Порыбачить"),
+            KeyboardButton(text="⚙️ Настройки")
+        ]
     ]
 
     return ReplyKeyboardMarkup(
