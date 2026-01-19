@@ -784,8 +784,12 @@ def format_wallet_info(info: dict) -> str:
     tokens = info.get('tokens', [])
     total_token_value = info.get('total_token_value_usd', 0.0)
 
-    if tokens and total_token_value > 0:
-        msg += f"🪙 <b>Токены ({len(tokens)}):</b> ${total_token_value:,.0f}\n\n"
+    if tokens:
+        if total_token_value > 0:
+            msg += f"🪙 <b>Токены ({len(tokens)}):</b> ${total_token_value:,.0f}\n\n"
+        else:
+            # Show count even if price API unavailable
+            msg += f"🪙 <b>Токены:</b> {len(tokens)}\n\n"
 
     # Wallet age (возраст кошелька)
     if wallet_age:

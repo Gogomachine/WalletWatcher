@@ -246,31 +246,38 @@ class SolanaClient:
             if not mint_addresses:
                 return {}
 
-            # Use Jupiter Price API
+            # Use Jupiter Price API v2
             ids = ",".join(mint_addresses[:100])  # Limit to 100 tokens
-            url = f"https://price.jup.ag/v4/price?ids={ids}"
+            url = f"https://api.jup.ag/price/v2?ids={ids}"
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                     if response.status != 200:
                         print(f"⚠️  Jupiter API error: {response.status}")
+                        response_text = await response.text()
+                        print(f"Response: {response_text[:200]}")
                         return {}
 
                     data = await response.json()
                     prices = {}
 
                     # Parse prices from response
+                    # Jupiter v2 returns: {"data": {"mint": {"id": "mint", "price": "123.45"}}}
                     price_data = data.get('data', {})
                     for mint, info in price_data.items():
-                        price = info.get('price')
-                        if price:
-                            prices[mint] = float(price)
+                        if isinstance(info, dict):
+                            price = info.get('price')
+                            if price:
+                                try:
+                                    prices[mint] = float(price)
+                                except (ValueError, TypeError):
+                                    continue
 
-                    print(f"✅ Got prices for {len(prices)}/{len(mint_addresses)} tokens")
+                    print(f"✅ Got prices for {len(prices)}/{len(mint_addresses)} tokens from Jupiter")
                     return prices
 
         except Exception as e:
-            print(f"❌ Error getting token prices: {e}")
+            print(f"❌ Error getting token prices from Jupiter: {e}")
             return {}
 
     async def calculate_total_token_value(self, tokens: List[Dict]) -> float:
