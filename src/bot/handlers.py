@@ -780,16 +780,10 @@ def format_wallet_info(info: dict) -> str:
     else:
         msg += f"💰 <b>Баланс:</b> Недоступен\n\n"
 
-    # Token balances (SPL tokens) - show only total value in USD
+    # Token balances (SPL tokens) - show count only
     tokens = info.get('tokens', [])
-    total_token_value = info.get('total_token_value_usd', 0.0)
-
     if tokens:
-        if total_token_value > 0:
-            msg += f"🪙 <b>Токены ({len(tokens)}):</b> ${total_token_value:,.0f}\n\n"
-        else:
-            # Show count even if price API unavailable
-            msg += f"🪙 <b>Токены:</b> {len(tokens)}\n\n"
+        msg += f"🪙 <b>Токены:</b> {len(tokens)}\n\n"
 
     # Wallet age (возраст кошелька)
     if wallet_age:

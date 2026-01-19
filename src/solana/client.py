@@ -233,96 +233,6 @@ class SolanaClient:
             print(f"⚠️  Could not enrich metadata: {e}")
             return tokens
 
-    async def get_token_prices(self, mint_addresses: List[str]) -> Dict[str, float]:
-        """Get token prices in USD from Jupiter API.
-
-        Args:
-            mint_addresses: List of token mint addresses
-
-        Returns:
-            Dict mapping mint address to USD price
-        """
-        # Временно отключено из-за недоступности price.jup.ag
-        # TODO: Добавить альтернативный источник цен или исправить endpoint
-        print(f"⚠️  Price API temporarily disabled. Token prices unavailable.")
-        return {}
-
-        # try:
-        #     if not mint_addresses:
-        #         return {}
-        #
-        #     # Use Jupiter Price API v2
-        #     # Docs: https://dev.jup.ag/api-reference/price/v2/price
-        #     ids = ",".join(mint_addresses[:100])  # Limit to 100 tokens
-        #     url = f"https://price.jup.ag/v2/price?ids={ids}"
-        #
-        #     async with aiohttp.ClientSession() as session:
-        #         async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-        #             if response.status != 200:
-        #                 print(f"⚠️  Jupiter API error: {response.status}")
-        #                 response_text = await response.text()
-        #                 print(f"Response: {response_text[:200]}")
-        #                 return {}
-        #
-        #             data = await response.json()
-        #             prices = {}
-        #
-        #             # Parse prices from response
-        #             # Jupiter v2 returns: {"data": {"mint": {"id": "mint", "price": "123.45"}}}
-        #             price_data = data.get('data', {})
-        #             for mint, info in price_data.items():
-        #                 if isinstance(info, dict):
-        #                     price = info.get('price')
-        #                     if price:
-        #                         try:
-        #                             prices[mint] = float(price)
-        #                         except (ValueError, TypeError):
-        #                             continue
-        #
-        #             print(f"✅ Got prices for {len(prices)}/{len(mint_addresses)} tokens from Jupiter")
-        #             return prices
-        #
-        # except Exception as e:
-        #     print(f"❌ Error getting token prices from Jupiter: {e}")
-        #     import traceback
-        #     traceback.print_exc()
-        #     return {}
-
-    async def calculate_total_token_value(self, tokens: List[Dict]) -> float:
-        """Calculate total value of tokens in USD.
-
-        Args:
-            tokens: List of token dicts with 'mint' and 'amount'
-
-        Returns:
-            Total value in USD
-        """
-        try:
-            if not tokens:
-                return 0.0
-
-            # Get prices for all tokens
-            mint_addresses = [token['mint'] for token in tokens]
-            prices = await self.get_token_prices(mint_addresses)
-
-            # Calculate total value
-            total_value = 0.0
-            for token in tokens:
-                mint = token['mint']
-                amount = token['amount']
-                price = prices.get(mint, 0.0)
-
-                if price > 0:
-                    value = amount * price
-                    total_value += value
-
-            print(f"💰 Total token value: ${total_value:,.2f}")
-            return total_value
-
-        except Exception as e:
-            print(f"❌ Error calculating token value: {e}")
-            return 0.0
-
     async def get_transaction_signatures(
         self,
         address: str,
@@ -546,19 +456,12 @@ class SolanaClient:
         if balance is not None:
             whale_tier = self.classify_whale(balance)
 
-        # Calculate total token value in USD
-        token_list = tokens if isinstance(tokens, list) else []
-        total_token_value_usd = 0.0
-        if token_list:
-            total_token_value_usd = await self.calculate_total_token_value(token_list)
-
         return {
             "address": address,
             "is_exchange": exchange is not None,
             "exchange_name": exchange,
             "balance": balance,
-            "tokens": token_list,
-            "total_token_value_usd": total_token_value_usd,
+            "tokens": tokens if isinstance(tokens, list) else [],
             "wallet_age": wallet_age,
             "last_transaction": last_tx,
             "whale_tier": whale_tier,
