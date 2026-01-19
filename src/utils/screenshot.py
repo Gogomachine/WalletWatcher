@@ -53,38 +53,32 @@ class SolscanScreenshot:
             await page.goto(url, wait_until="networkidle", timeout=30000)
 
             # Wait for Overview section to load
-            await page.wait_for_selector('text=Overview', timeout=10000)
+            await page.wait_for_selector('text=Total Value', timeout=15000)
 
             # Give it a moment for all data to populate
             await asyncio.sleep(3)
 
-            # Find the Overview card container
-            # Try multiple selectors to find the right container
-            overview_element = None
+            # Find the Overview card by looking for the parent container
+            # that contains both "Overview" and "Total Value"
+            # Use XPath for more reliable element finding
+            overview_element = page.locator('xpath=//div[contains(., "Overview") and contains(., "Total Value")][1]')
 
-            # Try to find by card/container structure
+            # Check if element exists, if not try alternative selectors
             try:
-                # Look for the card containing "Overview" heading and "Total Value"
-                overview_element = page.locator('div:has(h4:text("Overview")), div:has(h5:text("Overview")), div:has(h6:text("Overview"))').first
+                await overview_element.wait_for(timeout=5000)
             except:
-                pass
-
-            if not overview_element:
-                # Fallback: find parent container of "Total Value"
+                # Fallback: Find by bounding box - look for container with specific height/structure
                 try:
-                    overview_element = page.locator('div:has-text("Total Value")').first
+                    overview_element = page.locator('text=Total Value').locator('..').locator('..')
                 except:
-                    pass
-
-            if not overview_element:
-                # Last resort: use the first card-like element
-                overview_element = page.locator('div:has-text("Overview")').first
+                    # Last resort: just capture the area containing Total Value
+                    overview_element = page.locator('text=Total Value').locator('..')
 
             # Save screenshot
             screenshot_path = self.screenshot_dir / f"{address[:8]}.png"
 
-            # Take screenshot of the overview element with padding
-            await overview_element.screenshot(path=str(screenshot_path))
+            # Take screenshot of the overview element
+            await overview_element.screenshot(path=str(screenshot_path), timeout=10000)
 
             await page.close()
 
