@@ -906,8 +906,8 @@ def format_wallet_info(info: dict) -> str:
     else:  # Solana
         address_explorer_url = f"{explorer_base}/account/{address}"
 
-    # Address with link in brackets
-    msg = f"📍 {address[:8]}...{address[-6:]} ({address_explorer_url})\n"
+    # Address with link (hyperlinked text)
+    msg = f"📍 <a href='{address_explorer_url}'>{address[:8]}...{address[-6:]}</a>\n"
 
     # Balance in SOL (native token)
     if balance is not None:
@@ -937,6 +937,6 @@ def format_wallet_info(info: dict) -> str:
     if last_tx and last_tx.get('timestamp'):
         msg += f"🔄 Последняя транзакция:\n"
         msg += f"⏰ {last_tx['timestamp'].strftime('%d.%m.%Y %H:%M:%S')}\n"
-        msg += f"🔗 Посмотреть в эксплорере ({last_tx['explorer_url']})\n"
+        msg += f"🔗 <a href='{last_tx['explorer_url']}'>Посмотреть в эксплорере</a>\n"
 
     return msg

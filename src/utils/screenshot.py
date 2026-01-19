@@ -53,20 +53,37 @@ class SolscanScreenshot:
             await page.goto(url, wait_until="networkidle", timeout=30000)
 
             # Wait for Overview section to load
-            # The Overview section has class or data attribute we need to target
-            await page.wait_for_selector('div:has-text("Overview")', timeout=10000)
+            await page.wait_for_selector('text=Overview', timeout=10000)
 
             # Give it a moment for all data to populate
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
 
-            # Find the Overview container and take screenshot
-            # We'll screenshot the main overview card
-            overview_element = page.locator('div').filter(has_text='Overview').first
+            # Find the Overview card container
+            # Try multiple selectors to find the right container
+            overview_element = None
+
+            # Try to find by card/container structure
+            try:
+                # Look for the card containing "Overview" heading and "Total Value"
+                overview_element = page.locator('div:has(h4:text("Overview")), div:has(h5:text("Overview")), div:has(h6:text("Overview"))').first
+            except:
+                pass
+
+            if not overview_element:
+                # Fallback: find parent container of "Total Value"
+                try:
+                    overview_element = page.locator('div:has-text("Total Value")').first
+                except:
+                    pass
+
+            if not overview_element:
+                # Last resort: use the first card-like element
+                overview_element = page.locator('div:has-text("Overview")').first
 
             # Save screenshot
             screenshot_path = self.screenshot_dir / f"{address[:8]}.png"
 
-            # Take screenshot of the overview element
+            # Take screenshot of the overview element with padding
             await overview_element.screenshot(path=str(screenshot_path))
 
             await page.close()
@@ -75,6 +92,8 @@ class SolscanScreenshot:
 
         except Exception as e:
             print(f"❌ Error taking screenshot: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     async def cleanup_old_screenshots(self, max_age_seconds: int = 3600):
