@@ -780,38 +780,12 @@ def format_wallet_info(info: dict) -> str:
     else:
         msg += f"💰 <b>Баланс:</b> Недоступен\n\n"
 
-    # Token balances (SPL tokens)
+    # Token balances (SPL tokens) - show only total value in USD
     tokens = info.get('tokens', [])
-    print(f"🔍 DEBUG: Found {len(tokens)} tokens in wallet info")
-    if tokens:
-        print(f"🔍 DEBUG: First token: {tokens[0]}")
-        msg += f"🪙 <b>Токены ({len(tokens)}):</b>\n"
-        for token in tokens[:10]:  # Show max 10 tokens
-            mint = token.get('mint', '')
-            amount = token.get('amount', 0)
-            symbol = token.get('symbol')
-            name = token.get('name')
+    total_token_value = info.get('total_token_value_usd', 0.0)
 
-            # Format token display with symbol/name if available
-            if symbol:
-                token_display = f"<b>{symbol}</b>"
-                if name and name != symbol:
-                    token_display += f" ({name})"
-            else:
-                # Show shortened mint address if no symbol
-                if mint and len(mint) > 12:
-                    mint_short = f"{mint[:8]}...{mint[-4:]}"
-                    token_display = f"<code>{mint_short}</code>"
-                else:
-                    token_display = f"<code>{mint}</code>"
-
-            msg += f"  • {amount:,.4f} {token_display}\n"
-
-        if len(tokens) > 10:
-            msg += f"  ... и ещё {len(tokens) - 10}\n"
-        msg += "\n"
-    else:
-        print(f"⚠️  DEBUG: No tokens found in wallet info")
+    if tokens and total_token_value > 0:
+        msg += f"🪙 <b>Токены ({len(tokens)}):</b> ${total_token_value:,.0f}\n\n"
 
     # Wallet age (возраст кошелька)
     if wallet_age:
