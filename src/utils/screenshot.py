@@ -83,15 +83,15 @@ class SolscanScreenshot:
             screenshot_path = self.screenshot_dir / f"{address[:8]}.png"
 
             if overview_box:
-                # Take screenshot of the specific area with 15px padding on all sides
+                # Take screenshot of the specific area with 15px padding on all sides (expand outward)
                 padding = 15
                 await page.screenshot(
                     path=str(screenshot_path),
                     clip={
-                        'x': overview_box['x'] + padding,
-                        'y': overview_box['y'] + padding,
-                        'width': overview_box['width'] - (padding * 2),
-                        'height': overview_box['height'] - (padding * 2)
+                        'x': max(0, overview_box['x'] - padding),  # Don't go negative
+                        'y': max(0, overview_box['y'] - padding),
+                        'width': overview_box['width'] + (padding * 2),
+                        'height': overview_box['height'] + (padding * 2)
                     }
                 )
             else:
