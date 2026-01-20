@@ -747,13 +747,17 @@ async def check_address(message: Message, address: str):
     await status_msg.edit_text(get_random_peek_phrase())
     screenshot_path = await take_solscan_screenshot(address)
 
+    # Create "Add to favorites" button
+    keyboard = get_whale_result_keyboard(address)
+
     if screenshot_path and Path(screenshot_path).exists():
         # Send photo with caption
         photo = FSInputFile(screenshot_path)
         await message.answer_photo(
             photo=photo,
             caption=msg,
-            parse_mode="HTML"
+            parse_mode="HTML",
+            reply_markup=keyboard
         )
         await status_msg.delete()
 
@@ -764,7 +768,12 @@ async def check_address(message: Message, address: str):
             pass
     else:
         # Fallback to text only if screenshot failed
-        await status_msg.edit_text(msg, disable_web_page_preview=True, parse_mode="HTML")
+        await status_msg.edit_text(
+            msg,
+            disable_web_page_preview=True,
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
 
 
 # Address management callbacks
@@ -825,6 +834,9 @@ async def check_address_callback(callback: CallbackQuery):
     await callback.message.edit_text(get_random_peek_phrase())
     screenshot_path = await take_solscan_screenshot(address)
 
+    # Create "Add to favorites" button
+    keyboard = get_whale_result_keyboard(address)
+
     if screenshot_path and Path(screenshot_path).exists():
         # Delete status message and send photo with caption
         await callback.message.delete()
@@ -832,7 +844,8 @@ async def check_address_callback(callback: CallbackQuery):
         await callback.message.answer_photo(
             photo=photo,
             caption=msg,
-            parse_mode="HTML"
+            parse_mode="HTML",
+            reply_markup=keyboard
         )
 
         # Clean up screenshot file
@@ -842,7 +855,12 @@ async def check_address_callback(callback: CallbackQuery):
             pass
     else:
         # Fallback to text only if screenshot failed
-        await callback.message.edit_text(msg, disable_web_page_preview=True, parse_mode="HTML")
+        await callback.message.edit_text(
+            msg,
+            disable_web_page_preview=True,
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
 
     await callback.answer()
 
