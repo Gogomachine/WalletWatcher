@@ -132,6 +132,7 @@ class AddressMonitor:
         user_id = record['user_id']
         address = record['address']
         nickname = record['nickname']
+        group_name = record.get('group_name')
 
         # Check if user has notifications enabled
         settings = await self.database.get_user_settings(user_id)
@@ -153,20 +154,32 @@ class AddressMonitor:
         # Get transaction details for SOL amount
         tx_details = await self.solana_client.get_transaction_details(transaction['signature'])
 
-        # Format SOL amount
+        # Format SOL amount with better logging
         amount_str = ""
-        if tx_details and tx_details.get('sol_amount') is not None:
-            sol_amount = tx_details['sol_amount']
-            if sol_amount > 0.0001:  # Only show if significant amount
+        if tx_details:
+            print(f"📊 Transaction details for {transaction['signature'][:16]}: {tx_details}")
+            sol_amount = tx_details.get('sol_amount')
+            if sol_amount is not None and sol_amount > 0:
                 amount_str = f"💰 <b>Сумма:</b> {sol_amount:.4f} SOL\n"
+                print(f"✅ SOL amount found: {sol_amount:.4f}")
+            else:
+                print(f"⚠️  SOL amount not found or zero")
+        else:
+            print(f"❌ Could not get transaction details")
 
         # Format wallet name with hyperlink to Solscan
         wallet_display = nickname if nickname else f"{address[:8]}...{address[-6:]}"
+
+        # Add group info if available
+        group_str = ""
+        if group_name:
+            group_str = f"📁 <b>Группа:</b> {group_name}\n"
 
         # Format message
         message = (
             f"🔔 <b>Новая транзакция!</b>\n\n"
             f"📍 <b>Кошелёк:</b> {wallet_display}\n"
+            f"{group_str}"
             f"🔗 <a href='{address_url}'>{address}</a>\n\n"
             f"{amount_str}"
             f"📅 <b>Дата и время:</b> {time_str}\n"

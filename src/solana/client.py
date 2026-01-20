@@ -345,11 +345,23 @@ class SolanaClient:
                 pre_balances = tx.meta.pre_balances
                 post_balances = tx.meta.post_balances
 
-                # Calculate the difference for the first account (usually the sender)
-                if len(pre_balances) > 0 and len(post_balances) > 0:
+                # Find the largest balance change (excluding fee account)
+                max_change = 0
+                if len(pre_balances) == len(post_balances):
+                    for i in range(len(pre_balances)):
+                        balance_change = abs(post_balances[i] - pre_balances[i])
+                        if balance_change > max_change:
+                            max_change = balance_change
+
                     # Convert lamports to SOL
-                    balance_change = (post_balances[0] - pre_balances[0]) / 1_000_000_000
-                    sol_amount = abs(balance_change)
+                    if max_change > 0:
+                        sol_amount = max_change / 1_000_000_000
+
+                # If no amount found, try to extract from fee (for small transactions)
+                if sol_amount is None or sol_amount < 0.000001:
+                    if hasattr(tx.meta, 'fee') and tx.meta.fee:
+                        # At least show the transaction fee
+                        sol_amount = tx.meta.fee / 1_000_000_000
 
             return {
                 "signature": signature,
@@ -360,6 +372,8 @@ class SolanaClient:
 
         except Exception as e:
             print(f"Error getting transaction details for {signature}: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     async def get_wallet_age(self, address: str) -> Optional[Dict]:

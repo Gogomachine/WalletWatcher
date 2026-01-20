@@ -162,14 +162,24 @@ class Database:
         """Get all tracked addresses from all users.
 
         Returns:
-            List of all tracked address records with user_id
+            List of all tracked address records with user_id, group info
         """
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """
-                SELECT id, user_id, address, nickname, last_signature, last_checked
-                FROM tracked_addresses
+                SELECT
+                    t.id,
+                    t.user_id,
+                    t.address,
+                    t.nickname,
+                    t.last_signature,
+                    t.last_checked,
+                    t.group_id,
+                    t.notifications_enabled,
+                    g.name as group_name
+                FROM tracked_addresses t
+                LEFT JOIN address_groups g ON t.group_id = g.id
                 """
             ) as cursor:
                 rows = await cursor.fetchall()
