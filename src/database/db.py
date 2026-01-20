@@ -59,6 +59,20 @@ class Database:
                 )
             """)
 
+            # Migrate existing tracked_addresses table if needed
+            async with db.execute("PRAGMA table_info(tracked_addresses)") as cursor:
+                columns = [row[1] for row in await cursor.fetchall()]
+
+                # Add missing columns
+                if 'nickname' not in columns:
+                    await db.execute("ALTER TABLE tracked_addresses ADD COLUMN nickname TEXT")
+
+                if 'group_id' not in columns:
+                    await db.execute("ALTER TABLE tracked_addresses ADD COLUMN group_id INTEGER")
+
+                if 'notifications_enabled' not in columns:
+                    await db.execute("ALTER TABLE tracked_addresses ADD COLUMN notifications_enabled INTEGER DEFAULT 1")
+
             # Index for faster queries
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_user_addresses
