@@ -16,6 +16,7 @@ def get_main_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📋 Мои адреса", callback_data="menu_list")
         ],
         [InlineKeyboardButton(text="👀 Подсмотреть", callback_data="menu_whale")],
+        [InlineKeyboardButton(text="🔍 Анализ", callback_data="menu_analysis")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu_settings")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -139,6 +140,9 @@ def get_persistent_keyboard() -> ReplyKeyboardMarkup:
         ],
         [
             KeyboardButton(text="👀 Подсмотреть"),
+            KeyboardButton(text="🔍 Анализ")
+        ],
+        [
             KeyboardButton(text="⚙️ Настройки")
         ]
     ]

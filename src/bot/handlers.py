@@ -125,6 +125,7 @@ async def cmd_help(message: Message):
         "/track <адрес> - Добавить адрес в отслеживание\n"
         "/list - Мои отслеживаемые адреса\n"
         "/whale - Подсмотреть (случайный адрес)\n"
+        "/analysis - Анализ (скоро)\n"
         "/settings - Настройки\n\n"
         "<b>Получение информации:</b>\n"
         "Просто отправьте Solana адрес, и я покажу всю информацию о нём:\n"
@@ -245,6 +246,16 @@ async def text_whale_button(message: Message):
         )
 
 
+@router.message(F.text == "🔍 Анализ")
+async def text_analysis_button(message: Message):
+    """Handle 'Analysis' button press."""
+    await message.answer(
+        "🔍 <b>Анализ</b>\n\n"
+        "Скоро здесь появятся отчеты безопасности и настоящий АМЛ как у крутышек 😎",
+        parse_mode="HTML"
+    )
+
+
 @router.message(F.text == "⚙️ Настройки")
 async def text_settings_button(message: Message):
     """Handle 'Settings' button press."""
@@ -330,6 +341,16 @@ async def cmd_list(message: Message):
 async def cmd_settings(message: Message):
     """Handle /settings command."""
     await show_settings(message)
+
+
+@router.message(Command("analysis"))
+async def cmd_analysis(message: Message):
+    """Handle /analysis command."""
+    await message.reply(
+        "🔍 <b>Анализ</b>\n\n"
+        "Скоро здесь появятся отчеты безопасности и настоящий АМЛ как у крутышек 😎",
+        parse_mode="HTML"
+    )
 
 
 @router.message(Command("whale"))
@@ -442,6 +463,18 @@ async def menu_list_callback(callback: CallbackQuery):
         f"📋 <b>Ваши отслеживаемые адреса ({len(addresses)}):</b>\n\n"
         "Нажмите на адрес для управления:",
         reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu_analysis")
+async def menu_analysis_callback(callback: CallbackQuery):
+    """Handle 'Analysis' menu button."""
+    await callback.message.edit_text(
+        "🔍 <b>Анализ</b>\n\n"
+        "Скоро здесь появятся отчеты безопасности и настоящий АМЛ как у крутышек 😎",
+        reply_markup=get_main_menu(),
         parse_mode="HTML"
     )
     await callback.answer()
