@@ -2,6 +2,7 @@
 
 import os
 import re
+import random
 from pathlib import Path
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
@@ -25,6 +26,20 @@ from ..utils.screenshot import take_solscan_screenshot
 
 
 router = Router()
+
+# Забавные фразы для процесса получения скриншота
+PEEK_PHRASES = [
+    "👀 Заглядываю за угол...",
+    "🪟 Задвинул жалюзи...",
+    "📱 Делаю вид что говорю по телефону...",
+    "🕊️ Подсматриваю за голубями...",
+    "💓 Слушаю сердцебиение транзакции..."
+]
+
+
+def get_random_peek_phrase() -> str:
+    """Get random peek phrase for screenshot process."""
+    return random.choice(PEEK_PHRASES)
 
 
 class AddressStates(StatesGroup):
@@ -201,7 +216,7 @@ async def text_whale_button(message: Message):
     msg += format_wallet_info(info)
 
     # Try to get screenshot from Solscan
-    await status_msg.edit_text("📸 Создаю скриншот Solscan...")
+    await status_msg.edit_text(get_random_peek_phrase())
     screenshot_path = await take_solscan_screenshot(address)
 
     if screenshot_path and Path(screenshot_path).exists():
@@ -349,7 +364,7 @@ async def cmd_whale(message: Message):
     msg += format_wallet_info(info)
 
     # Try to get screenshot from Solscan
-    await status_msg.edit_text("📸 Создаю скриншот Solscan...")
+    await status_msg.edit_text(get_random_peek_phrase())
     screenshot_path = await take_solscan_screenshot(address)
 
     if screenshot_path and Path(screenshot_path).exists():
@@ -473,7 +488,7 @@ async def menu_whale_callback(callback: CallbackQuery):
     msg += format_wallet_info(info)
 
     # Try to get screenshot from Solscan
-    await callback.message.edit_text("📸 Создаю скриншот Solscan...")
+    await callback.message.edit_text(get_random_peek_phrase())
     screenshot_path = await take_solscan_screenshot(address)
 
     if screenshot_path and Path(screenshot_path).exists():
@@ -577,7 +592,7 @@ async def process_address(message: Message, state: FSMContext):
     msg = format_wallet_info(info)
 
     # Try to get screenshot from Solscan
-    await status_msg.edit_text("📸 Создаю скриншот Solscan...")
+    await status_msg.edit_text(get_random_peek_phrase())
     screenshot_path = await take_solscan_screenshot(address)
 
     # Проверяем, добавляем ли адрес в отслеживание
@@ -697,7 +712,7 @@ async def check_address(message: Message, address: str):
     msg = format_wallet_info(info)
 
     # Try to get screenshot from Solscan
-    await status_msg.edit_text("📸 Создаю скриншот Solscan...")
+    await status_msg.edit_text(get_random_peek_phrase())
     screenshot_path = await take_solscan_screenshot(address)
 
     if screenshot_path and Path(screenshot_path).exists():
@@ -766,7 +781,7 @@ async def check_address_callback(callback: CallbackQuery):
     msg = format_wallet_info(info)
 
     # Try to get screenshot from Solscan
-    await callback.message.edit_text("📸 Создаю скриншот Solscan...")
+    await callback.message.edit_text(get_random_peek_phrase())
     screenshot_path = await take_solscan_screenshot(address)
 
     if screenshot_path and Path(screenshot_path).exists():
