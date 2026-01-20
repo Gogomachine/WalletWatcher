@@ -28,21 +28,50 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def send_notification(bot: Bot, user_id: int, message: str):
+async def send_notification(bot: Bot, user_id: int, message: str, photo_path: str = None):
     """Send notification to user.
 
     Args:
         bot: Bot instance
         user_id: Telegram user ID
         message: Message text
+        photo_path: Optional path to photo file
     """
     try:
-        await bot.send_message(
-            user_id,
-            message,
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True
-        )
+        if photo_path:
+            # Send photo with caption
+            from aiogram.types import FSInputFile
+            from pathlib import Path
+
+            if Path(photo_path).exists():
+                photo = FSInputFile(photo_path)
+                await bot.send_photo(
+                    user_id,
+                    photo=photo,
+                    caption=message,
+                    parse_mode=ParseMode.HTML
+                )
+                # Clean up photo file after sending
+                try:
+                    Path(photo_path).unlink()
+                except:
+                    pass
+            else:
+                # Fallback to text if photo doesn't exist
+                await bot.send_message(
+                    user_id,
+                    message,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True
+                )
+        else:
+            # Send text message
+            await bot.send_message(
+                user_id,
+                message,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True
+            )
     except Exception as e:
         logger.error(f"Error sending notification to {user_id}: {e}")
 
@@ -102,7 +131,7 @@ async def main():
     monitor = AddressMonitor(
         solana_client=solana_client,
         database=database,
-        notification_callback=lambda user_id, msg: send_notification(bot, user_id, msg),
+        notification_callback=lambda user_id, msg, photo=None: send_notification(bot, user_id, msg, photo),
         interval=monitor_interval
     )
 

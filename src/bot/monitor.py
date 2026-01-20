@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Callable
 from ..solana.client import SolanaClient
 from ..database.db import Database
+from ..utils.screenshot import take_transaction_screenshot
 
 
 class AddressMonitor:
@@ -186,9 +187,21 @@ class AddressMonitor:
             f"🔍 <a href='{tx_url}'>Посмотреть транзакцию</a>"
         )
 
-        # Call notification callback
+        # Take transaction screenshot
+        screenshot_path = None
         try:
-            await self.notification_callback(user_id, message)
+            print(f"📸 Taking screenshot of transaction {transaction['signature'][:16]}...")
+            screenshot_path = await take_transaction_screenshot(transaction['signature'])
+            if screenshot_path:
+                print(f"✅ Screenshot saved: {screenshot_path}")
+            else:
+                print(f"⚠️  Screenshot failed, sending text only")
+        except Exception as e:
+            print(f"❌ Error taking transaction screenshot: {e}")
+
+        # Call notification callback with screenshot
+        try:
+            await self.notification_callback(user_id, message, screenshot_path)
         except Exception as e:
             print(f"Error sending notification to user {user_id}: {e}")
 

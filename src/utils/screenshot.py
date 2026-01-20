@@ -129,6 +129,90 @@ class SolscanScreenshot:
             traceback.print_exc()
             return None
 
+    async def take_transaction_screenshot(self, signature: str) -> Optional[str]:
+        """Take screenshot of transaction details from Solscan.
+
+        Args:
+            signature: Transaction signature
+
+        Returns:
+            Path to screenshot file or None if failed
+        """
+        try:
+            await self.init_browser()
+
+            # Create new page with fixed viewport
+            page = await self.browser.new_page(
+                viewport={'width': 800, 'height': 1200}
+            )
+
+            # Navigate to Solscan transaction page
+            url = f"https://solscan.io/tx/{signature}"
+            await page.goto(url, wait_until="networkidle", timeout=30000)
+
+            # Wait for transaction details to load
+            await page.wait_for_selector('text=Legacy Mode', timeout=15000)
+
+            # Give it a moment for all data to populate
+            await asyncio.sleep(3)
+
+            # Find the transaction instruction block
+            # Look for "Legacy Mode" or "TransferChecked" text
+            try:
+                instruction_locator = page.locator('text=Legacy Mode').first
+            except:
+                try:
+                    instruction_locator = page.locator('text=TransferChecked').first
+                except:
+                    instruction_locator = page.locator('text=Transfer').first
+
+            # Navigate up to find the instruction card container
+            parent_levels = [3, 4, 5, 6, 7, 8]
+            instruction_box = None
+
+            for level in parent_levels:
+                try:
+                    parent_locator = instruction_locator.locator(f'xpath=ancestor::div[{level}]')
+                    box = await parent_locator.bounding_box()
+                    # Look for a reasonably sized container (instruction cards are typically 200-600px tall)
+                    if box and box['height'] > 100 and box['height'] < 800 and box['width'] > 300:
+                        instruction_box = box
+                        print(f"✓ Found instruction block at level {level}: {box}")
+                        break
+                except:
+                    continue
+
+            # Save screenshot
+            screenshot_path = self.screenshot_dir / f"tx_{signature[:16]}.png"
+
+            if instruction_box:
+                # Take screenshot with padding
+                padding = 15
+                await page.screenshot(
+                    path=str(screenshot_path),
+                    clip={
+                        'x': max(0, instruction_box['x'] - padding),
+                        'y': max(0, instruction_box['y'] - padding),
+                        'width': instruction_box['width'] + (padding * 2),
+                        'height': instruction_box['height'] + (padding * 2)
+                    }
+                )
+                print(f"✓ Transaction screenshot saved: {screenshot_path}")
+            else:
+                print("⚠ Could not find instruction block, taking fallback screenshot")
+                # Fallback: take a larger area of the page
+                await page.screenshot(path=str(screenshot_path), full_page=False)
+
+            await page.close()
+
+            return str(screenshot_path)
+
+        except Exception as e:
+            print(f"❌ Error taking transaction screenshot: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
     async def cleanup_old_screenshots(self, max_age_seconds: int = 3600):
         """Remove old screenshot files.
 
@@ -172,3 +256,16 @@ async def take_solscan_screenshot(address: str) -> Optional[str]:
     """
     manager = await get_screenshot_manager()
     return await manager.take_overview_screenshot(address)
+
+
+async def take_transaction_screenshot(signature: str) -> Optional[str]:
+    """Take screenshot of transaction details from Solscan.
+
+    Args:
+        signature: Transaction signature
+
+    Returns:
+        Path to screenshot file or None if failed
+    """
+    manager = await get_screenshot_manager()
+    return await manager.take_transaction_screenshot(signature)
