@@ -723,24 +723,6 @@ async def process_nickname(message: Message, state: FSMContext):
     await state.clear()
 
 
-# Автоматическая проверка адресов в сообщениях
-
-
-@router.message(F.text)
-async def handle_text_message(message: Message, state: FSMContext):
-    """Handle text messages - check if it's a Solana address."""
-    # Если мы в состоянии ожидания, пропускаем
-    current_state = await state.get_state()
-    if current_state:
-        return
-
-    text = message.text.strip()
-
-    # Проверяем, является ли текст адресом Solana
-    if is_blockchain_address(text):
-        await check_address(message, text)
-
-
 async def check_address(message: Message, address: str):
     """Check and display address information.
 
@@ -1288,6 +1270,25 @@ async def show_settings_callback(callback: CallbackQuery):
         reply_markup=get_notifications_keyboard(settings['notifications_enabled']),
         parse_mode="HTML"
     )
+
+
+# Автоматическая проверка адресов в сообщениях
+# ВАЖНО: Этот обработчик должен быть в конце, после всех StateFilter обработчиков!
+
+
+@router.message(F.text)
+async def handle_text_message(message: Message, state: FSMContext):
+    """Handle text messages - check if it's a Solana address."""
+    # Если мы в состоянии ожидания, пропускаем
+    current_state = await state.get_state()
+    if current_state:
+        return
+
+    text = message.text.strip()
+
+    # Проверяем, является ли текст адресом Solana
+    if is_blockchain_address(text):
+        await check_address(message, text)
 
 
 def format_wallet_info(info: dict) -> str:
