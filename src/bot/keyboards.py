@@ -47,45 +47,79 @@ def get_skip_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def get_tracked_addresses_keyboard(addresses: list) -> InlineKeyboardMarkup:
-    """Get keyboard with tracked addresses.
+def get_tracked_addresses_keyboard(addresses: list, groups: list = None) -> InlineKeyboardMarkup:
+    """Get keyboard with tracked addresses and groups.
 
     Args:
         addresses: List of tracked address records
+        groups: List of group records
 
     Returns:
-        Inline keyboard with addresses
+        Inline keyboard with addresses and groups
     """
     buttons = []
 
-    for addr in addresses:
-        address = addr['address']
-        nickname = addr.get('nickname')
+    # Add groups first if any
+    if groups:
+        for group in groups:
+            group_id = group['id']
+            group_name = group['name']
+            address_count = group.get('address_count', 0)
 
-        # Кнопка с никнеймом или сокращенным адресом
-        label = nickname if nickname else f"{address[:8]}...{address[-4:]}"
+            buttons.append([
+                InlineKeyboardButton(
+                    text=f"📁 {group_name} ({address_count})",
+                    callback_data=f"group_{group_id}"
+                )
+            ])
 
-        buttons.append([
-            InlineKeyboardButton(
-                text=label,
-                callback_data=f"addr_{address}"
-            )
-        ])
+    # Add ungrouped addresses
+    ungrouped = [addr for addr in addresses if not addr.get('group_id')]
+
+    if ungrouped:
+        for addr in ungrouped:
+            address = addr['address']
+            nickname = addr.get('nickname')
+
+            # Кнопка с никнеймом или сокращенным адресом
+            label = nickname if nickname else f"{address[:8]}...{address[-4:]}"
+
+            buttons.append([
+                InlineKeyboardButton(
+                    text=label,
+                    callback_data=f"addr_{address}"
+                )
+            ])
+
+    # Add "Create Group" button
+    buttons.append([
+        InlineKeyboardButton(
+            text="➕ Создать группу",
+            callback_data="create_group"
+        )
+    ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def get_address_actions_keyboard(address: str) -> InlineKeyboardMarkup:
+def get_address_actions_keyboard(address: str, notifications_enabled: bool = True) -> InlineKeyboardMarkup:
     """Get keyboard with actions for an address.
 
     Args:
         address: Solana address
+        notifications_enabled: Whether notifications are currently enabled
 
     Returns:
         Inline keyboard with actions
     """
+    notif_text = "🔕 Выключить уведомления" if notifications_enabled else "🔔 Включить уведомления"
+    notif_callback = f"notif_off_{address}" if notifications_enabled else f"notif_on_{address}"
+
     buttons = [
         [InlineKeyboardButton(text="🔍 Проверить", callback_data=f"check_{address}")],
+        [InlineKeyboardButton(text=notif_text, callback_data=notif_callback)],
+        [InlineKeyboardButton(text="✏️ Назвать адрес", callback_data=f"rename_{address}")],
+        [InlineKeyboardButton(text="📁 Добавить в группу", callback_data=f"addtogroup_{address}")],
         [InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"remove_{address}")],
         [InlineKeyboardButton(text="🔙 Назад к списку", callback_data="back_to_list")],
     ]
@@ -123,6 +157,83 @@ def get_whale_result_keyboard(address: str) -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="⭐ Добавить в избранное", callback_data=f"fav_add_{address}")],
     ]
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_group_addresses_keyboard(addresses: list, group_id: int) -> InlineKeyboardMarkup:
+    """Get keyboard with addresses in a group.
+
+    Args:
+        addresses: List of address records in group
+        group_id: Group ID
+
+    Returns:
+        Inline keyboard with addresses
+    """
+    buttons = []
+
+    for addr in addresses:
+        address = addr['address']
+        nickname = addr.get('nickname')
+
+        label = nickname if nickname else f"{address[:8]}...{address[-4:]}"
+
+        buttons.append([
+            InlineKeyboardButton(
+                text=label,
+                callback_data=f"addr_{address}"
+            )
+        ])
+
+    # Back button
+    buttons.append([
+        InlineKeyboardButton(
+            text="🔙 Назад к списку",
+            callback_data="back_to_list"
+        )
+    ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            text="🗑️ Удалить группу",
+            callback_data=f"delgroup_{group_id}"
+        )
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_select_addresses_keyboard(addresses: list) -> InlineKeyboardMarkup:
+    """Get keyboard for selecting addresses to add to group.
+
+    Args:
+        addresses: List of ungrouped address records
+
+    Returns:
+        Inline keyboard with addresses
+    """
+    buttons = []
+
+    for addr in addresses:
+        address = addr['address']
+        nickname = addr.get('nickname')
+
+        label = nickname if nickname else f"{address[:8]}...{address[-4:]}"
+
+        buttons.append([
+            InlineKeyboardButton(
+                text=label,
+                callback_data=f"selectaddr_{address}"
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            text="❌ Отмена",
+            callback_data="cancel_group"
+        )
+    ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 

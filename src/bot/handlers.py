@@ -6,7 +6,7 @@ import random
 from pathlib import Path
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, CallbackQuery, FSInputFile
+from aiogram.types import Message, CallbackQuery, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ChatType
@@ -46,6 +46,17 @@ class AddressStates(StatesGroup):
     """States for address input."""
     waiting_for_address = State()
     waiting_for_nickname = State()
+
+
+class GroupStates(StatesGroup):
+    """States for group management."""
+    waiting_for_group_name = State()
+    selecting_addresses_for_group = State()
+
+
+class RenameStates(StatesGroup):
+    """States for renaming address."""
+    waiting_for_new_nickname = State()
 
 
 # Глобальные переменные для клиентов (будут инициализированы в main.py)
@@ -164,8 +175,9 @@ async def text_check_button(message: Message):
 @router.message(F.text == "📋 Отслеживание")
 async def text_tracking_button(message: Message):
     """Handle 'Tracking' button press."""
-    # Show list of tracked addresses
+    # Show list of tracked addresses and groups
     addresses = await database.get_user_tracked_addresses(message.from_user.id)
+    groups = await database.get_user_groups(message.from_user.id)
 
     if not addresses:
         await message.answer(
@@ -176,10 +188,10 @@ async def text_tracking_button(message: Message):
             reply_markup=get_main_menu()
         )
     else:
-        keyboard = get_tracked_addresses_keyboard(addresses)
+        keyboard = get_tracked_addresses_keyboard(addresses, groups)
         await message.answer(
             f"📋 <b>Ваши отслеживаемые адреса ({len(addresses)}):</b>\n\n"
-            "Нажмите на адрес для управления:",
+            "Нажмите на адрес или группу для управления:",
             reply_markup=keyboard,
             parse_mode="HTML"
         )
@@ -319,7 +331,9 @@ async def cmd_track(message: Message):
 @router.message(Command("list"))
 async def cmd_list(message: Message):
     """Handle /list command to show tracked addresses."""
-    addresses = await database.get_user_tracked_addresses(message.from_user.id)
+    user_id = message.from_user.id
+    addresses = await database.get_user_tracked_addresses(user_id)
+    groups = await database.get_user_groups(user_id)
 
     if not addresses:
         await message.reply(
@@ -328,10 +342,10 @@ async def cmd_list(message: Message):
         )
         return
 
-    keyboard = get_tracked_addresses_keyboard(addresses)
+    keyboard = get_tracked_addresses_keyboard(addresses, groups)
     await message.reply(
         f"📋 <b>Ваши отслеживаемые адреса ({len(addresses)}):</b>\n\n"
-        "Нажмите на адрес для управления:",
+        "Нажмите на адрес или группу для управления:",
         reply_markup=keyboard,
         parse_mode="HTML"
     )
@@ -448,6 +462,7 @@ async def menu_add_callback(callback: CallbackQuery, state: FSMContext):
 async def menu_list_callback(callback: CallbackQuery):
     """Handle 'My addresses' menu button."""
     addresses = await database.get_user_tracked_addresses(callback.from_user.id)
+    groups = await database.get_user_groups(callback.from_user.id)
 
     if not addresses:
         await callback.message.edit_text(
@@ -458,10 +473,10 @@ async def menu_list_callback(callback: CallbackQuery):
         await callback.answer()
         return
 
-    keyboard = get_tracked_addresses_keyboard(addresses)
+    keyboard = get_tracked_addresses_keyboard(addresses, groups)
     await callback.message.edit_text(
         f"📋 <b>Ваши отслеживаемые адреса ({len(addresses)}):</b>\n\n"
-        "Нажмите на адрес для управления:",
+        "Нажмите на адрес или группу для управления:",
         reply_markup=keyboard,
         parse_mode="HTML"
     )
@@ -775,11 +790,20 @@ async def check_address(message: Message, address: str):
 async def show_address_actions(callback: CallbackQuery):
     """Show actions for a tracked address."""
     address = callback.data.split("_", 1)[1]
+    user_id = callback.from_user.id
+
+    # Get address info to check notification status
+    addr_info = await database.get_address_info(user_id, address)
+    notifications_enabled = addr_info.get('notifications_enabled', 1) if addr_info else True
+
+    nickname = addr_info.get('nickname', '') if addr_info else ''
+    display_text = nickname if nickname else f"{address[:8]}...{address[-6:]}"
 
     await callback.message.edit_text(
-        f"🔍 <b>Адрес:</b> <code>{address}</code>\n\n"
+        f"🔍 <b>Адрес:</b> {display_text}\n"
+        f"<code>{address}</code>\n\n"
         "Выберите действие:",
-        reply_markup=get_address_actions_keyboard(address),
+        reply_markup=get_address_actions_keyboard(address, notifications_enabled),
         parse_mode="HTML"
     )
     await callback.answer()
@@ -856,6 +880,96 @@ async def add_to_favorites_callback(callback: CallbackQuery):
     await callback.answer("⭐ Адрес добавлен в избранное!", show_alert=True)
 
 
+# Notification management for addresses
+
+@router.callback_query(F.data.startswith("notif_on_"))
+async def enable_address_notifications(callback: CallbackQuery):
+    """Enable notifications for an address."""
+    address = callback.data.split("_", 2)[2]
+    user_id = callback.from_user.id
+
+    await database.update_address_notifications(user_id, address, True)
+    await callback.answer("🔔 Уведомления включены для этого адреса")
+
+    # Refresh the address actions menu
+    addr_info = await database.get_address_info(user_id, address)
+    nickname = addr_info.get('nickname', '') if addr_info else ''
+    display_text = nickname if nickname else f"{address[:8]}...{address[-6:]}"
+
+    await callback.message.edit_text(
+        f"🔍 <b>Адрес:</b> {display_text}\n"
+        f"<code>{address}</code>\n\n"
+        "Выберите действие:",
+        reply_markup=get_address_actions_keyboard(address, True),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("notif_off_"))
+async def disable_address_notifications(callback: CallbackQuery):
+    """Disable notifications for an address."""
+    address = callback.data.split("_", 2)[2]
+    user_id = callback.from_user.id
+
+    await database.update_address_notifications(user_id, address, False)
+    await callback.answer("🔕 Уведомления выключены для этого адреса")
+
+    # Refresh the address actions menu
+    addr_info = await database.get_address_info(user_id, address)
+    nickname = addr_info.get('nickname', '') if addr_info else ''
+    display_text = nickname if nickname else f"{address[:8]}...{address[-6:]}"
+
+    await callback.message.edit_text(
+        f"🔍 <b>Адрес:</b> {display_text}\n"
+        f"<code>{address}</code>\n\n"
+        "Выберите действие:",
+        reply_markup=get_address_actions_keyboard(address, False),
+        parse_mode="HTML"
+    )
+
+
+# Rename address
+
+@router.callback_query(F.data.startswith("rename_"))
+async def rename_address_callback(callback: CallbackQuery, state: FSMContext):
+    """Start renaming an address."""
+    address = callback.data.split("_", 1)[1]
+
+    await state.update_data(address=address)
+    await state.set_state(RenameStates.waiting_for_new_nickname)
+
+    await callback.message.edit_text(
+        f"✏️ <b>Назвать адрес</b>\n\n"
+        f"<code>{address}</code>\n\n"
+        "Отправьте новый никнейм для этого адреса:",
+        parse_mode="HTML",
+        reply_markup=get_cancel_keyboard()
+    )
+    await callback.answer()
+
+
+@router.message(StateFilter(RenameStates.waiting_for_new_nickname))
+async def process_new_nickname(message: Message, state: FSMContext):
+    """Process new nickname for address."""
+    data = await state.get_data()
+    address = data.get('address')
+    nickname = message.text.strip()
+
+    if not address:
+        await message.reply("Ошибка: адрес не найден")
+        await state.clear()
+        return
+
+    await database.update_address_nickname(message.from_user.id, address, nickname)
+    await message.reply(
+        f"✅ Адрес переименован!\n\n"
+        f"🏷️ <b>{nickname}</b>\n"
+        f"<code>{address}</code>",
+        parse_mode="HTML"
+    )
+    await state.clear()
+
+
 @router.callback_query(F.data == "toggle_notifications")
 async def toggle_notifications(callback: CallbackQuery):
     """Toggle notifications on/off."""
@@ -874,16 +988,186 @@ async def toggle_notifications(callback: CallbackQuery):
 @router.callback_query(F.data == "back_to_list")
 async def back_to_list(callback: CallbackQuery):
     """Go back to address list."""
-    addresses = await database.get_user_tracked_addresses(callback.from_user.id)
-    keyboard = get_tracked_addresses_keyboard(addresses)
+    user_id = callback.from_user.id
+    addresses = await database.get_user_tracked_addresses(user_id)
+    groups = await database.get_user_groups(user_id)
+    keyboard = get_tracked_addresses_keyboard(addresses, groups)
 
     await callback.message.edit_text(
         f"📋 <b>Ваши отслеживаемые адреса ({len(addresses)}):</b>\n\n"
-        "Нажмите на адрес для управления:",
+        "Нажмите на адрес или группу для управления:",
         reply_markup=keyboard,
         parse_mode="HTML"
     )
     await callback.answer()
+
+
+# Group management
+
+@router.callback_query(F.data == "create_group")
+async def create_group_callback(callback: CallbackQuery, state: FSMContext):
+    """Start group creation."""
+    await state.set_state(GroupStates.waiting_for_group_name)
+
+    await callback.message.edit_text(
+        "📁 <b>Создание группы</b>\n\n"
+        "Отправьте название для новой группы:",
+        parse_mode="HTML",
+        reply_markup=get_cancel_keyboard()
+    )
+    await callback.answer()
+
+
+@router.message(StateFilter(GroupStates.waiting_for_group_name))
+async def process_group_name(message: Message, state: FSMContext):
+    """Process group name and create group."""
+    group_name = message.text.strip()
+    user_id = message.from_user.id
+
+    if len(group_name) > 50:
+        await message.reply("❌ Название группы слишком длинное (максимум 50 символов)")
+        return
+
+    success = await database.create_group(user_id, group_name)
+
+    if success:
+        await message.reply(
+            f"✅ Группа <b>«{group_name}»</b> создана!\n\n"
+            "Теперь вы можете добавить в неё адреса.",
+            parse_mode="HTML"
+        )
+        await state.clear()
+    else:
+        await message.reply(
+            "❌ Группа с таким названием уже существует.\n\n"
+            "Придумайте другое название."
+        )
+
+
+@router.callback_query(F.data.startswith("group_"))
+async def show_group_callback(callback: CallbackQuery):
+    """Show addresses in a group."""
+    group_id = int(callback.data.split("_", 1)[1])
+    user_id = callback.from_user.id
+
+    groups = await database.get_user_groups(user_id)
+    group = next((g for g in groups if g['id'] == group_id), None)
+
+    if not group:
+        await callback.answer("❌ Группа не найдена", show_alert=True)
+        return
+
+    addresses = await database.get_group_addresses(user_id, group_id)
+
+    if addresses:
+        keyboard = get_group_addresses_keyboard(addresses, group_id)
+        await callback.message.edit_text(
+            f"📁 <b>Группа: {group['name']}</b>\n\n"
+            f"Адресов в группе: {len(addresses)}\n\n"
+            "Нажмите на адрес для управления:",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    else:
+        await callback.message.edit_text(
+            f"📁 <b>Группа: {group['name']}</b>\n\n"
+            "В группе пока нет адресов.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Назад к списку", callback_data="back_to_list")],
+                [InlineKeyboardButton(text="🗑️ Удалить группу", callback_data=f"delgroup_{group_id}")]
+            ]),
+            parse_mode="HTML"
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("delgroup_"))
+async def delete_group_callback(callback: CallbackQuery):
+    """Delete a group."""
+    group_id = int(callback.data.split("_", 1)[1])
+    user_id = callback.from_user.id
+
+    success = await database.delete_group(user_id, group_id)
+
+    if success:
+        await callback.answer("✅ Группа удалена")
+        # Show updated list
+        await back_to_list(callback)
+    else:
+        await callback.answer("❌ Ошибка при удалении группы", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("addtogroup_"))
+async def add_to_group_start(callback: CallbackQuery, state: FSMContext):
+    """Start adding address to group."""
+    address = callback.data.split("_", 1)[1]
+    user_id = callback.from_user.id
+
+    groups = await database.get_user_groups(user_id)
+
+    if not groups:
+        await callback.answer(
+            "❌ У вас нет групп. Сначала создайте группу!",
+            show_alert=True
+        )
+        return
+
+    await state.update_data(address=address)
+
+    # Show groups to choose from
+    buttons = []
+    for group in groups:
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"📁 {group['name']}",
+                callback_data=f"togroup_{group['id']}"
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")
+    ])
+
+    await callback.message.edit_text(
+        f"📁 <b>Добавить в группу</b>\n\n"
+        f"<code>{address}</code>\n\n"
+        "Выберите группу:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("togroup_"))
+async def add_to_group_confirm(callback: CallbackQuery, state: FSMContext):
+    """Confirm adding address to group."""
+    group_id = int(callback.data.split("_", 1)[1])
+    user_id = callback.from_user.id
+
+    data = await state.get_data()
+    address = data.get('address')
+
+    if not address:
+        await callback.answer("❌ Ошибка: адрес не найден", show_alert=True)
+        return
+
+    success = await database.add_address_to_group(user_id, address, group_id)
+
+    if success:
+        await callback.answer("✅ Адрес добавлен в группу!")
+        await state.clear()
+        # Show updated address list
+        await back_to_list(callback)
+    else:
+        await callback.answer("❌ Ошибка при добавлении в группу", show_alert=True)
+
+
+@router.callback_query(F.data == "cancel_group")
+async def cancel_group_creation(callback: CallbackQuery, state: FSMContext):
+    """Cancel group creation."""
+    await state.clear()
+    await back_to_list(callback)
 
 
 async def show_settings(message: Message):

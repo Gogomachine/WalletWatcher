@@ -29,10 +29,23 @@ class Database:
                     user_id INTEGER NOT NULL,
                     address TEXT NOT NULL,
                     nickname TEXT,
+                    group_id INTEGER,
+                    notifications_enabled INTEGER DEFAULT 1,
                     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_signature TEXT,
                     last_checked TIMESTAMP,
                     UNIQUE(user_id, address)
+                )
+            """)
+
+            # Table for groups
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS address_groups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, name)
                 )
             """)
 
@@ -50,6 +63,11 @@ class Database:
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_user_addresses
                 ON tracked_addresses(user_id)
+            """)
+
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_user_groups
+                ON address_groups(user_id)
             """)
 
             await db.commit()
@@ -234,3 +252,211 @@ class Database:
             ) as cursor:
                 result = await cursor.fetchone()
                 return result[0] if result else 0
+
+    # Group management methods
+
+    async def create_group(self, user_id: int, name: str) -> bool:
+        """Create a new address group.
+
+        Args:
+            user_id: Telegram user ID
+            name: Group name
+
+        Returns:
+            True if created successfully, False if already exists
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    "INSERT INTO address_groups (user_id, name) VALUES (?, ?)",
+                    (user_id, name)
+                )
+                await db.commit()
+                return True
+        except aiosqlite.IntegrityError:
+            return False
+
+    async def get_user_groups(self, user_id: int) -> List[Dict]:
+        """Get all groups for a user.
+
+        Args:
+            user_id: Telegram user ID
+
+        Returns:
+            List of group records
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT id, name, created_at,
+                       (SELECT COUNT(*) FROM tracked_addresses WHERE group_id = address_groups.id) as address_count
+                FROM address_groups
+                WHERE user_id = ?
+                ORDER BY name
+                """,
+                (user_id,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def delete_group(self, user_id: int, group_id: int) -> bool:
+        """Delete a group.
+
+        Args:
+            user_id: Telegram user ID
+            group_id: Group ID
+
+        Returns:
+            True if deleted
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            # Remove group from all addresses first
+            await db.execute(
+                "UPDATE tracked_addresses SET group_id = NULL WHERE group_id = ?",
+                (group_id,)
+            )
+            cursor = await db.execute(
+                "DELETE FROM address_groups WHERE id = ? AND user_id = ?",
+                (group_id, user_id)
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def add_address_to_group(self, user_id: int, address: str, group_id: int) -> bool:
+        """Add address to a group.
+
+        Args:
+            user_id: Telegram user ID
+            address: Address to add
+            group_id: Group ID
+
+        Returns:
+            True if updated
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                UPDATE tracked_addresses
+                SET group_id = ?
+                WHERE user_id = ? AND address = ?
+                """,
+                (group_id, user_id, address)
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def remove_address_from_group(self, user_id: int, address: str) -> bool:
+        """Remove address from its group.
+
+        Args:
+            user_id: Telegram user ID
+            address: Address to remove from group
+
+        Returns:
+            True if updated
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                UPDATE tracked_addresses
+                SET group_id = NULL
+                WHERE user_id = ? AND address = ?
+                """,
+                (user_id, address)
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def get_group_addresses(self, user_id: int, group_id: int) -> List[Dict]:
+        """Get all addresses in a group.
+
+        Args:
+            user_id: Telegram user ID
+            group_id: Group ID
+
+        Returns:
+            List of address records
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT address, nickname, notifications_enabled, added_at
+                FROM tracked_addresses
+                WHERE user_id = ? AND group_id = ?
+                ORDER BY added_at DESC
+                """,
+                (user_id, group_id)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def update_address_nickname(self, user_id: int, address: str, nickname: str) -> bool:
+        """Update nickname for an address.
+
+        Args:
+            user_id: Telegram user ID
+            address: Address
+            nickname: New nickname
+
+        Returns:
+            True if updated
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                UPDATE tracked_addresses
+                SET nickname = ?
+                WHERE user_id = ? AND address = ?
+                """,
+                (nickname, user_id, address)
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def update_address_notifications(self, user_id: int, address: str, enabled: bool) -> bool:
+        """Update notification settings for an address.
+
+        Args:
+            user_id: Telegram user ID
+            address: Address
+            enabled: Whether notifications are enabled
+
+        Returns:
+            True if updated
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                UPDATE tracked_addresses
+                SET notifications_enabled = ?
+                WHERE user_id = ? AND address = ?
+                """,
+                (int(enabled), user_id, address)
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def get_address_info(self, user_id: int, address: str) -> Optional[Dict]:
+        """Get info about a tracked address.
+
+        Args:
+            user_id: Telegram user ID
+            address: Address
+
+        Returns:
+            Address info dict or None
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT address, nickname, group_id, notifications_enabled, added_at
+                FROM tracked_addresses
+                WHERE user_id = ? AND address = ?
+                """,
+                (user_id, address)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
