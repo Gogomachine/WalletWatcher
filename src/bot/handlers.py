@@ -1098,6 +1098,84 @@ async def delete_group_callback(callback: CallbackQuery):
         await callback.answer("❌ Ошибка при удалении группы", show_alert=True)
 
 
+@router.callback_query(F.data.startswith("groupbal_"))
+async def show_group_balance(callback: CallbackQuery):
+    """Calculate and show total SOL balance for all addresses in group."""
+    group_id = int(callback.data.split("_", 1)[1])
+    user_id = callback.from_user.id
+
+    # Get group info
+    groups = await database.get_user_groups(user_id)
+    group = next((g for g in groups if g['id'] == group_id), None)
+
+    if not group:
+        await callback.answer("❌ Группа не найдена", show_alert=True)
+        return
+
+    # Get all addresses in group
+    addresses = await database.get_group_addresses(user_id, group_id)
+
+    if not addresses:
+        await callback.answer("❌ В группе нет адресов", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        f"💰 <b>Подсчёт баланса группы {group['name']}</b>\n\n"
+        f"⏳ Проверяю {len(addresses)} адресов...",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+    # Calculate total balance
+    total_balance = 0.0
+    address_balances = []
+    errors = []
+
+    for addr in addresses:
+        address = addr['address']
+        nickname = addr.get('nickname', '')
+        display_name = nickname if nickname else f"{address[:8]}...{address[-4:]}"
+
+        try:
+            info = await blockchain_client.get_wallet_info(address)
+            if "error" not in info and info.get('balance') is not None:
+                balance = info['balance']
+                total_balance += balance
+                address_balances.append({
+                    'name': display_name,
+                    'address': address,
+                    'balance': balance
+                })
+            else:
+                errors.append(display_name)
+        except Exception as e:
+            print(f"Error getting balance for {address}: {e}")
+            errors.append(display_name)
+
+    # Format result message
+    msg = f"💰 <b>Общий баланс группы: {group['name']}</b>\n\n"
+    msg += f"<b>Итого: {total_balance:.4f} SOL</b>\n\n"
+
+    if address_balances:
+        msg += "📊 <b>По адресам:</b>\n"
+        for item in sorted(address_balances, key=lambda x: x['balance'], reverse=True):
+            msg += f"• {item['name']}: {item['balance']:.4f} SOL\n"
+
+    if errors:
+        msg += f"\n⚠️ Не удалось получить баланс для {len(errors)} адресов"
+
+    # Add back button
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад к группе", callback_data=f"group_{group_id}")]
+    ])
+
+    await callback.message.edit_text(
+        msg,
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+
+
 @router.callback_query(F.data.startswith("addtogroup_"))
 async def add_to_group_start(callback: CallbackQuery, state: FSMContext):
     """Start adding address to group."""

@@ -186,6 +186,14 @@ def get_group_addresses_keyboard(addresses: list, group_id: int) -> InlineKeyboa
             )
         ])
 
+    # Group balance button
+    buttons.append([
+        InlineKeyboardButton(
+            text="💰 Общий SOL баланс",
+            callback_data=f"groupbal_{group_id}"
+        )
+    ])
+
     # Back button
     buttons.append([
         InlineKeyboardButton(
