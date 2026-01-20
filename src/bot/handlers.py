@@ -18,7 +18,9 @@ from .keyboards import (
     get_cancel_keyboard,
     get_skip_keyboard,
     get_whale_result_keyboard,
-    get_persistent_keyboard
+    get_persistent_keyboard,
+    get_group_addresses_keyboard,
+    get_select_addresses_keyboard
 )
 from ..blockchain.universal_client import UniversalBlockchainClient, detect_address_type
 from ..database.db import Database
