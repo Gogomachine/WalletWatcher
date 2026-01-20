@@ -138,21 +138,39 @@ class AddressMonitor:
         if not settings.get('notifications_enabled', 1):
             return
 
+        # Check if address has notifications enabled
+        if not record.get('notifications_enabled', 1):
+            return
+
         # Format transaction time
         tx_time = datetime.fromtimestamp(transaction['block_time']) if transaction['block_time'] else None
-        time_str = tx_time.strftime('%Y-%m-%d %H:%M:%S') if tx_time else 'Unknown'
+        time_str = tx_time.strftime('%d.%m.%Y %H:%M:%S') if tx_time else 'Неизвестно'
 
-        # Create explorer URL
-        explorer_url = f"https://solscan.io/tx/{transaction['signature']}"
+        # Create explorer URLs
+        address_url = f"https://solscan.io/account/{address}"
+        tx_url = f"https://solscan.io/tx/{transaction['signature']}"
+
+        # Get transaction details for SOL amount
+        tx_details = await self.solana_client.get_transaction_details(transaction['signature'])
+
+        # Format SOL amount
+        amount_str = ""
+        if tx_details and tx_details.get('sol_amount') is not None:
+            sol_amount = tx_details['sol_amount']
+            if sol_amount > 0.0001:  # Only show if significant amount
+                amount_str = f"💰 <b>Сумма:</b> {sol_amount:.4f} SOL\n"
+
+        # Format wallet name with hyperlink to Solscan
+        wallet_display = nickname if nickname else f"{address[:8]}...{address[-6:]}"
 
         # Format message
         message = (
             f"🔔 <b>Новая транзакция!</b>\n\n"
-            f"📍 <b>Адрес:</b> {nickname or address[:8] + '...'}\n"
-            f"🔗 <code>{address}</code>\n\n"
-            f"⏰ <b>Время:</b> {time_str}\n"
-            f"🔍 <b>Signature:</b> <code>{transaction['signature'][:16]}...</code>\n\n"
-            f"<a href='{explorer_url}'>Посмотреть в эксплорере</a>"
+            f"📍 <b>Кошелёк:</b> {wallet_display}\n"
+            f"🔗 <a href='{address_url}'>{address}</a>\n\n"
+            f"{amount_str}"
+            f"📅 <b>Дата и время:</b> {time_str}\n"
+            f"🔍 <a href='{tx_url}'>Посмотреть транзакцию</a>"
         )
 
         # Call notification callback

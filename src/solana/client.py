@@ -312,8 +312,55 @@ class SolanaClient:
         return {
             "signature": last_tx["signature"],
             "timestamp": datetime.fromtimestamp(last_tx["block_time"]) if last_tx["block_time"] else None,
-            "explorer_url": f"https://solscan.io/tx/{last_tx['signature']}"
+            "explorer_url": f"https://solscan.io/tx/{last_tx['signature']}",
+            "block_time": last_tx["block_time"]
         }
+
+    async def get_transaction_details(self, signature: str) -> Optional[Dict]:
+        """Get detailed transaction information including SOL amount transferred.
+
+        Args:
+            signature: Transaction signature
+
+        Returns:
+            Dict with transaction details or None if error
+        """
+        try:
+            sig = Signature.from_string(signature)
+            response = await self.client.get_transaction(
+                sig,
+                encoding="jsonParsed",
+                max_supported_transaction_version=0,
+                commitment=Confirmed
+            )
+
+            if not response.value:
+                return None
+
+            tx = response.value
+
+            # Extract SOL transfer amount from pre and post balances
+            sol_amount = None
+            if hasattr(tx, 'meta') and tx.meta:
+                pre_balances = tx.meta.pre_balances
+                post_balances = tx.meta.post_balances
+
+                # Calculate the difference for the first account (usually the sender)
+                if len(pre_balances) > 0 and len(post_balances) > 0:
+                    # Convert lamports to SOL
+                    balance_change = (post_balances[0] - pre_balances[0]) / 1_000_000_000
+                    sol_amount = abs(balance_change)
+
+            return {
+                "signature": signature,
+                "sol_amount": sol_amount,
+                "slot": tx.slot if hasattr(tx, 'slot') else None,
+                "block_time": tx.block_time if hasattr(tx, 'block_time') else None
+            }
+
+        except Exception as e:
+            print(f"Error getting transaction details for {signature}: {e}")
+            return None
 
     async def get_wallet_age(self, address: str) -> Optional[Dict]:
         """Calculate wallet age based on first transaction.
