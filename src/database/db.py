@@ -91,6 +91,13 @@ class Database:
                 if 'is_premium' not in settings_columns:
                     await db.execute("ALTER TABLE user_settings ADD COLUMN is_premium INTEGER DEFAULT 0")
 
+                # Fix NULL values in existing records (critical for increment operations)
+                await db.execute("""
+                    UPDATE user_settings
+                    SET whale_checks_today = 0
+                    WHERE whale_checks_today IS NULL
+                """)
+
             # Index for faster queries
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_user_addresses
@@ -614,11 +621,11 @@ class Database:
                 (user_id,)
             )
 
-            # Increment counter
+            # Increment counter (COALESCE handles NULL values from old migrations)
             await db.execute(
                 """
                 UPDATE user_settings
-                SET whale_checks_today = whale_checks_today + 1,
+                SET whale_checks_today = COALESCE(whale_checks_today, 0) + 1,
                     last_whale_check_date = DATE('now')
                 WHERE user_id = ?
                 """,

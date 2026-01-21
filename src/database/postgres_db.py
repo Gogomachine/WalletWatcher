@@ -97,6 +97,13 @@ class PostgresDatabase:
                     ALTER TABLE user_settings
                     ADD COLUMN IF NOT EXISTS is_premium BOOLEAN DEFAULT FALSE
                 """)
+
+                # Fix NULL values in existing records (critical for increment operations)
+                await conn.execute("""
+                    UPDATE user_settings
+                    SET whale_checks_today = 0
+                    WHERE whale_checks_today IS NULL
+                """)
             except Exception as e:
                 # Columns might already exist
                 pass
@@ -602,11 +609,11 @@ class PostgresDatabase:
                 user_id
             )
 
-            # Increment counter
+            # Increment counter (COALESCE handles NULL values from old migrations)
             await conn.execute(
                 """
                 UPDATE user_settings
-                SET whale_checks_today = whale_checks_today + 1,
+                SET whale_checks_today = COALESCE(whale_checks_today, 0) + 1,
                     last_whale_check_date = CURRENT_DATE
                 WHERE user_id = $1
                 """,
