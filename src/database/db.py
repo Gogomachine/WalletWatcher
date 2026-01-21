@@ -81,6 +81,16 @@ class Database:
                 if 'bot_active' not in settings_columns:
                     await db.execute("ALTER TABLE user_settings ADD COLUMN bot_active INTEGER DEFAULT 1")
 
+                # Add whale check limits columns if missing
+                if 'whale_checks_today' not in settings_columns:
+                    await db.execute("ALTER TABLE user_settings ADD COLUMN whale_checks_today INTEGER DEFAULT 0")
+
+                if 'last_whale_check_date' not in settings_columns:
+                    await db.execute("ALTER TABLE user_settings ADD COLUMN last_whale_check_date DATE")
+
+                if 'is_premium' not in settings_columns:
+                    await db.execute("ALTER TABLE user_settings ADD COLUMN is_premium INTEGER DEFAULT 0")
+
             # Index for faster queries
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_user_addresses
@@ -534,3 +544,107 @@ class Database:
             ) as cursor:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
+
+    # Whale check limits methods
+
+    async def get_whale_checks_remaining(self, user_id: int) -> tuple[int, int]:
+        """Get remaining whale checks for today.
+
+        Args:
+            user_id: Telegram user ID
+
+        Returns:
+            Tuple of (checks_used_today, max_checks)
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT whale_checks_today, last_whale_check_date, is_premium FROM user_settings WHERE user_id = ?",
+                (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+
+                if not row:
+                    # Create default settings
+                    await db.execute(
+                        "INSERT INTO user_settings (user_id, whale_checks_today, last_whale_check_date) VALUES (?, 0, DATE('now'))",
+                        (user_id,)
+                    )
+                    await db.commit()
+                    return (0, 3)
+
+                checks_today = row['whale_checks_today'] or 0
+                last_check_date = row['last_whale_check_date']
+                is_premium = row['is_premium'] or 0
+
+                # Check if it's a new day - reset counter
+                from datetime import date
+                today = date.today().isoformat()
+
+                if last_check_date != today:
+                    # New day - reset counter
+                    await db.execute(
+                        "UPDATE user_settings SET whale_checks_today = 0, last_whale_check_date = DATE('now') WHERE user_id = ?",
+                        (user_id,)
+                    )
+                    await db.commit()
+                    checks_today = 0
+
+                # Max checks: 3 for free, 5 for premium
+                max_checks = 5 if is_premium else 3
+
+                return (checks_today, max_checks)
+
+    async def increment_whale_check(self, user_id: int) -> bool:
+        """Increment whale check counter for today.
+
+        Args:
+            user_id: Telegram user ID
+
+        Returns:
+            True if incremented successfully
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            # Ensure user settings exist
+            await db.execute(
+                """
+                INSERT OR IGNORE INTO user_settings (user_id, whale_checks_today, last_whale_check_date)
+                VALUES (?, 0, DATE('now'))
+                """,
+                (user_id,)
+            )
+
+            # Increment counter
+            await db.execute(
+                """
+                UPDATE user_settings
+                SET whale_checks_today = whale_checks_today + 1,
+                    last_whale_check_date = DATE('now')
+                WHERE user_id = ?
+                """,
+                (user_id,)
+            )
+            await db.commit()
+            return True
+
+    async def update_premium_status(self, user_id: int, is_premium: bool) -> bool:
+        """Update premium status for user.
+
+        Args:
+            user_id: Telegram user ID
+            is_premium: Premium status
+
+        Returns:
+            True if updated
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO user_settings (user_id, is_premium)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET is_premium = ?
+                """,
+                (user_id, int(is_premium), int(is_premium))
+            )
+            await db.commit()
+            return True

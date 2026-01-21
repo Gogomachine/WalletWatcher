@@ -20,7 +20,8 @@ from .keyboards import (
     get_whale_result_keyboard,
     get_persistent_keyboard,
     get_group_addresses_keyboard,
-    get_select_addresses_keyboard
+    get_select_addresses_keyboard,
+    get_whale_limit_exceeded_keyboard
 )
 from ..blockchain.universal_client import UniversalBlockchainClient, detect_address_type
 from ..database.db import Database
@@ -198,8 +199,14 @@ async def text_profile_button(message: Message):
     # Get user stats
     count = await database.get_tracked_address_count(user_id)
     groups = await database.get_user_groups(user_id)
+    settings = await database.get_user_settings(user_id)
+    checks_used, max_checks = await database.get_whale_checks_remaining(user_id)
 
     username_str = f"@{username}" if username else "Не указан"
+    is_premium = settings.get('is_premium', 0)
+    subscription_status = "💎 Премиум" if is_premium else "🆓 Бесплатная"
+
+    remaining_checks = max_checks - checks_used
 
     await message.answer(
         f"👤 <b>Ваш профиль</b>\n\n"
@@ -209,8 +216,9 @@ async def text_profile_button(message: Message):
         f"📊 <b>Статистика:</b>\n"
         f"📋 Отслеживаемых адресов: {count}\n"
         f"📁 Групп: {len(groups)}\n\n"
-        f"💎 <b>Подписка:</b> Бесплатная\n"
-        f"<i>(Премиум функции скоро появятся)</i>",
+        f"💎 <b>Подписка:</b> {subscription_status}\n"
+        f"👀 <b>Подсмотреть:</b> {remaining_checks}/{max_checks} попыток осталось сегодня\n\n"
+        f"<i>Лимит обнуляется каждый день в 00:00</i>",
         parse_mode="HTML"
     )
 
@@ -242,8 +250,43 @@ async def text_tracking_button(message: Message):
 
 @router.message(F.text == "👀 Подсмотреть")
 async def text_whale_button(message: Message):
-    """Handle 'Peek' button press."""
-    status_msg = await message.answer("👀 Подсматриваю...")
+    """Handle 'Peek' button press with daily limit check."""
+    user_id = message.from_user.id
+
+    # Check daily limit
+    checks_used, max_checks = await database.get_whale_checks_remaining(user_id)
+    remaining = max_checks - checks_used
+
+    if remaining <= 0:
+        # Limit exceeded - show payment options
+        settings = await database.get_user_settings(user_id)
+        is_premium = settings.get('is_premium', 0)
+
+        limit_msg = (
+            "⛔ <b>Лимит исчерпан</b>\n\n"
+            f"Вы использовали все {'5' if is_premium else '3'} бесплатные попытки на сегодня.\n"
+            f"Попыток использовано: {checks_used}\n\n"
+            "💡 Вы можете:\n"
+            "• Купить дополнительную попытку за Telegram Stars\n"
+            "• Оформить премиум подписку (5 попыток/день)\n"
+            "• Вернуться завтра (лимит обнуляется в 00:00)"
+        )
+
+        await message.answer(
+            limit_msg,
+            parse_mode="HTML",
+            reply_markup=get_whale_limit_exceeded_keyboard(checks_used)
+        )
+        return
+
+    # Increment counter before showing
+    await database.increment_whale_check(user_id)
+
+    status_msg = await message.answer(
+        f"👀 Подсматриваю...\n\n"
+        f"<i>Осталось попыток сегодня: {remaining - 1}</i>",
+        parse_mode="HTML"
+    )
 
     # Discover random whale address
     address = await blockchain_client.discover_whale_address(min_balance_usd=100000)
@@ -270,6 +313,7 @@ async def text_whale_button(message: Message):
     # Format wallet info
     msg = "👀 <b>Подсмотрел!</b>\n\n"
     msg += format_wallet_info(info)
+    msg += f"\n\n<i>💫 Осталось попыток сегодня: {remaining - 1}</i>"
 
     # Try to get screenshot from Solscan
     await status_msg.edit_text(get_random_peek_phrase())
@@ -593,8 +637,14 @@ async def menu_profile_callback(callback: CallbackQuery):
     # Get user stats
     count = await database.get_tracked_address_count(user_id)
     groups = await database.get_user_groups(user_id)
+    settings = await database.get_user_settings(user_id)
+    checks_used, max_checks = await database.get_whale_checks_remaining(user_id)
 
     username_str = f"@{username}" if username else "Не указан"
+    is_premium = settings.get('is_premium', 0)
+    subscription_status = "💎 Премиум" if is_premium else "🆓 Бесплатная"
+
+    remaining_checks = max_checks - checks_used
 
     await callback.message.edit_text(
         f"👤 <b>Ваш профиль</b>\n\n"
@@ -604,8 +654,9 @@ async def menu_profile_callback(callback: CallbackQuery):
         f"📊 <b>Статистика:</b>\n"
         f"📋 Отслеживаемых адресов: {count}\n"
         f"📁 Групп: {len(groups)}\n\n"
-        f"💎 <b>Подписка:</b> Бесплатная\n"
-        f"<i>(Премиум функции скоро появятся)</i>",
+        f"💎 <b>Подписка:</b> {subscription_status}\n"
+        f"👀 <b>Подсмотреть:</b> {remaining_checks}/{max_checks} попыток осталось сегодня\n\n"
+        f"<i>Лимит обнуляется каждый день в 00:00</i>",
         parse_mode="HTML",
         reply_markup=get_main_menu()
     )
@@ -620,8 +671,44 @@ async def menu_settings_callback(callback: CallbackQuery):
 
 @router.callback_query(F.data == "menu_whale")
 async def menu_whale_callback(callback: CallbackQuery):
-    """Handle 'Peek' menu button."""
-    await callback.message.edit_text("👀 Подсматриваю...")
+    """Handle 'Peek' menu button with daily limit check."""
+    user_id = callback.from_user.id
+
+    # Check daily limit
+    checks_used, max_checks = await database.get_whale_checks_remaining(user_id)
+    remaining = max_checks - checks_used
+
+    if remaining <= 0:
+        # Limit exceeded - show payment options
+        settings = await database.get_user_settings(user_id)
+        is_premium = settings.get('is_premium', 0)
+
+        limit_msg = (
+            "⛔ <b>Лимит исчерпан</b>\n\n"
+            f"Вы использовали все {'5' if is_premium else '3'} бесплатные попытки на сегодня.\n"
+            f"Попыток использовано: {checks_used}\n\n"
+            "💡 Вы можете:\n"
+            "• Купить дополнительную попытку за Telegram Stars\n"
+            "• Оформить премиум подписку (5 попыток/день)\n"
+            "• Вернуться завтра (лимит обнуляется в 00:00)"
+        )
+
+        await callback.message.edit_text(
+            limit_msg,
+            parse_mode="HTML",
+            reply_markup=get_whale_limit_exceeded_keyboard(checks_used)
+        )
+        await callback.answer()
+        return
+
+    # Increment counter before showing
+    await database.increment_whale_check(user_id)
+
+    await callback.message.edit_text(
+        f"👀 Подсматриваю...\n\n"
+        f"<i>Осталось попыток сегодня: {remaining - 1}</i>",
+        parse_mode="HTML"
+    )
     await callback.answer()
 
     # Discover random whale address (min $100,000 balance)
@@ -651,6 +738,7 @@ async def menu_whale_callback(callback: CallbackQuery):
     # Format wallet info
     msg = "👀 <b>Подсмотрел!</b>\n\n"
     msg += format_wallet_info(info)
+    msg += f"\n\n<i>💫 Осталось попыток сегодня: {remaining - 1}</i>"
 
     # Try to get screenshot from Solscan
     await callback.message.edit_text(get_random_peek_phrase())
@@ -1405,6 +1493,53 @@ async def show_settings_callback(callback: CallbackQuery):
         reply_markup=get_notifications_keyboard(settings['notifications_enabled']),
         parse_mode="HTML"
     )
+
+
+# Telegram Stars payment handlers
+
+@router.callback_query(F.data.startswith("buy_whale_check_"))
+async def buy_whale_check_callback(callback: CallbackQuery):
+    """Handle purchase of additional whale check via Telegram Stars."""
+    try:
+        price_stars = int(callback.data.split("_")[-1])
+    except:
+        await callback.answer("❌ Ошибка в цене", show_alert=True)
+        return
+
+    await callback.answer(
+        f"💫 Покупка дополнительной попытки за {price_stars} звезд будет доступна в следующей версии!\n\n"
+        f"Сейчас эта функция в разработке. Следите за обновлениями!",
+        show_alert=True
+    )
+
+    # TODO: Implement Telegram Stars payment
+    # from aiogram.types import LabeledPrice
+    # prices = [LabeledPrice(label="Дополнительная попытка 'Подсмотреть'", amount=price_stars)]
+    # await callback.message.answer_invoice(
+    #     title="Дополнительная попытка",
+    #     description=f"Купить 1 дополнительную попытку 'Подсмотреть' за {price_stars} звезд",
+    #     payload=f"whale_check_{callback.from_user.id}",
+    #     provider_token="",  # Empty for Telegram Stars
+    #     currency="XTR",  # Telegram Stars currency
+    #     prices=prices
+    # )
+
+
+@router.callback_query(F.data == "buy_premium")
+async def buy_premium_callback(callback: CallbackQuery):
+    """Handle premium subscription purchase."""
+    await callback.answer(
+        "💎 Премиум подписка скоро будет доступна!\n\n"
+        "Преимущества премиум:\n"
+        "• 5 попыток 'Подсмотреть' в день вместо 3\n"
+        "• Расширенная статистика\n"
+        "• Приоритетная поддержка\n\n"
+        "Следите за обновлениями!",
+        show_alert=True
+    )
+
+    # TODO: Implement premium subscription
+    # Price TBD - maybe 100 stars/month or similar
 
 
 # Автоматическая проверка адресов в сообщениях

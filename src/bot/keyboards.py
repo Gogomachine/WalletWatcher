@@ -278,3 +278,45 @@ def get_persistent_keyboard(bot_active: bool = True) -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         persistent=True
     )
+
+
+def get_whale_limit_exceeded_keyboard(checks_used: int) -> InlineKeyboardMarkup:
+    """Get keyboard for when whale check limit is exceeded.
+
+    Args:
+        checks_used: Number of checks already used today
+
+    Returns:
+        Inline keyboard with purchase options
+    """
+    # Calculate price for next check (1000 stars * check number)
+    # 4th check = 1000 stars
+    # 5th check = 2000 stars
+    # 6th check = 3000 stars, etc.
+    next_check_num = checks_used + 1
+    free_checks = 3  # Number of free checks
+    paid_check_index = next_check_num - free_checks  # 1, 2, 3...
+    price_stars = paid_check_index * 1000
+
+    buttons = [
+        [
+            InlineKeyboardButton(
+                text=f"⭐ Купить 1 попытку ({price_stars} звезд)",
+                callback_data=f"buy_whale_check_{price_stars}"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="💎 Премиум подписка (5 попыток/день)",
+                callback_data="buy_premium"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🔙 Назад",
+                callback_data="cancel"
+            )
+        ]
+    ]
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

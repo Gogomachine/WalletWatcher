@@ -76,9 +76,30 @@ class PostgresDatabase:
                     notifications_enabled BOOLEAN DEFAULT TRUE,
                     bot_active BOOLEAN DEFAULT TRUE,
                     language TEXT DEFAULT 'ru',
+                    whale_checks_today INTEGER DEFAULT 0,
+                    last_whale_check_date DATE,
+                    is_premium BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Migrate existing user_settings table (add new columns if missing)
+            try:
+                await conn.execute("""
+                    ALTER TABLE user_settings
+                    ADD COLUMN IF NOT EXISTS whale_checks_today INTEGER DEFAULT 0
+                """)
+                await conn.execute("""
+                    ALTER TABLE user_settings
+                    ADD COLUMN IF NOT EXISTS last_whale_check_date DATE
+                """)
+                await conn.execute("""
+                    ALTER TABLE user_settings
+                    ADD COLUMN IF NOT EXISTS is_premium BOOLEAN DEFAULT FALSE
+                """)
+            except Exception as e:
+                # Columns might already exist
+                pass
 
             # Performance indexes
             await conn.execute("""
@@ -514,3 +535,102 @@ class PostgresDatabase:
                 user_id, address
             )
             return dict(row) if row else None
+
+    # Whale check limits methods
+
+    async def get_whale_checks_remaining(self, user_id: int) -> tuple[int, int]:
+        """Get remaining whale checks for today.
+
+        Args:
+            user_id: Telegram user ID
+
+        Returns:
+            Tuple of (checks_used_today, max_checks)
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT whale_checks_today, last_whale_check_date, is_premium FROM user_settings WHERE user_id = $1",
+                user_id
+            )
+
+            if not row:
+                # Create default settings
+                await conn.execute(
+                    "INSERT INTO user_settings (user_id, whale_checks_today, last_whale_check_date) VALUES ($1, 0, CURRENT_DATE)",
+                    user_id
+                )
+                return (0, 3)
+
+            checks_today = row['whale_checks_today'] or 0
+            last_check_date = row['last_whale_check_date']
+            is_premium = row['is_premium'] or False
+
+            # Check if it's a new day - reset counter
+            from datetime import date
+            today = date.today()
+
+            if last_check_date != today:
+                # New day - reset counter
+                await conn.execute(
+                    "UPDATE user_settings SET whale_checks_today = 0, last_whale_check_date = CURRENT_DATE WHERE user_id = $1",
+                    user_id
+                )
+                checks_today = 0
+
+            # Max checks: 3 for free, 5 for premium
+            max_checks = 5 if is_premium else 3
+
+            return (checks_today, max_checks)
+
+    async def increment_whale_check(self, user_id: int) -> bool:
+        """Increment whale check counter for today.
+
+        Args:
+            user_id: Telegram user ID
+
+        Returns:
+            True if incremented successfully
+        """
+        async with self.pool.acquire() as conn:
+            # Ensure user settings exist
+            await conn.execute(
+                """
+                INSERT INTO user_settings (user_id, whale_checks_today, last_whale_check_date)
+                VALUES ($1, 0, CURRENT_DATE)
+                ON CONFLICT (user_id) DO NOTHING
+                """,
+                user_id
+            )
+
+            # Increment counter
+            await conn.execute(
+                """
+                UPDATE user_settings
+                SET whale_checks_today = whale_checks_today + 1,
+                    last_whale_check_date = CURRENT_DATE
+                WHERE user_id = $1
+                """,
+                user_id
+            )
+            return True
+
+    async def update_premium_status(self, user_id: int, is_premium: bool) -> bool:
+        """Update premium status for user.
+
+        Args:
+            user_id: Telegram user ID
+            is_premium: Premium status
+
+        Returns:
+            True if updated
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO user_settings (user_id, is_premium)
+                VALUES ($1, $2)
+                ON CONFLICT(user_id) DO UPDATE SET is_premium = $2
+                """,
+                user_id, is_premium
+            )
+            return True
