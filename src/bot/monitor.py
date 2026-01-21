@@ -140,6 +140,11 @@ class AddressMonitor:
         if not settings.get('notifications_enabled', 1):
             return
 
+        # Check if bot is active for this user
+        if not settings.get('bot_active', 1):
+            print(f"⏸️  Bot is paused for user {user_id}, skipping notification")
+            return
+
         # Check if address has notifications enabled
         if not record.get('notifications_enabled', 1):
             return

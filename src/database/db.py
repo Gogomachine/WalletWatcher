@@ -73,6 +73,14 @@ class Database:
                 if 'notifications_enabled' not in columns:
                     await db.execute("ALTER TABLE tracked_addresses ADD COLUMN notifications_enabled INTEGER DEFAULT 1")
 
+            # Migrate user_settings table if needed
+            async with db.execute("PRAGMA table_info(user_settings)") as cursor:
+                settings_columns = [row[1] for row in await cursor.fetchall()]
+
+                # Add bot_active column if missing
+                if 'bot_active' not in settings_columns:
+                    await db.execute("ALTER TABLE user_settings ADD COLUMN bot_active INTEGER DEFAULT 1")
+
             # Index for faster queries
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_user_addresses
@@ -235,7 +243,8 @@ class Database:
                     return {
                         "user_id": user_id,
                         "notifications_enabled": 1,
-                        "language": "ru"
+                        "language": "ru",
+                        "bot_active": 1
                     }
 
     async def update_notifications_enabled(
@@ -257,6 +266,28 @@ class Database:
                 ON CONFLICT(user_id) DO UPDATE SET notifications_enabled = ?
                 """,
                 (user_id, int(enabled), int(enabled))
+            )
+            await db.commit()
+
+    async def update_bot_active(
+        self,
+        user_id: int,
+        active: bool
+    ):
+        """Update bot active status for user.
+
+        Args:
+            user_id: Telegram user ID
+            active: Whether bot is active for this user
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO user_settings (user_id, bot_active)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET bot_active = ?
+                """,
+                (user_id, int(active), int(active))
             )
             await db.commit()
 

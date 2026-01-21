@@ -100,12 +100,16 @@ def is_blockchain_address(text: str) -> bool:
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     """Handle /start command."""
+    # Get user settings for bot_active status
+    settings = await database.get_user_settings(message.from_user.id)
+    bot_active = settings.get('bot_active', 1)
+
     # Если в группе, отвечаем кратко
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await message.reply(
             "👋 Привет! Я бот для отслеживания Solana адресов.\n\n"
             "Отправьте адрес или используйте /menu для просмотра команд.",
-            reply_markup=get_persistent_keyboard()
+            reply_markup=get_persistent_keyboard(bot_active=bool(bot_active))
         )
     else:
         await message.answer(
@@ -116,7 +120,7 @@ async def cmd_start(message: Message):
             f"• Отслеживать адреса в реальном времени\n"
             f"• Уведомлять о новых транзакциях\n\n"
             f"Используйте меню ниже для навигации:",
-            reply_markup=get_persistent_keyboard()
+            reply_markup=get_persistent_keyboard(bot_active=bool(bot_active))
         )
         # Send inline menu after persistent keyboard
         await message.answer(
@@ -158,9 +162,18 @@ async def cmd_help(message: Message):
 @router.message(Command("menu"))
 async def cmd_menu(message: Message):
     """Handle /menu command."""
+    # Update keyboard based on bot_active status
+    settings = await database.get_user_settings(message.from_user.id)
+    bot_active = settings.get('bot_active', 1)
+
     await message.reply(
         "📱 Главное меню:",
         reply_markup=get_main_menu()
+    )
+    # Update persistent keyboard to show current status
+    await message.answer(
+        "Используйте кнопки ниже:",
+        reply_markup=get_persistent_keyboard(bot_active=bool(bot_active))
     )
 
 
@@ -274,6 +287,47 @@ async def text_analysis_button(message: Message):
 async def text_settings_button(message: Message):
     """Handle 'Settings' button press."""
     await show_settings(message)
+
+
+@router.message(F.text == "🛑 Стоп")
+async def text_stop_button(message: Message):
+    """Handle 'Stop' button press - pauses bot for user."""
+    user_id = message.from_user.id
+
+    # Update bot status to inactive
+    await database.update_bot_active(user_id, False)
+
+    # Send confirmation with updated keyboard
+    await message.answer(
+        "🛑 <b>Бот остановлен</b>\n\n"
+        "Все процессы приостановлены:\n"
+        "• Мониторинг транзакций отключён\n"
+        "• Уведомления не отправляются\n\n"
+        "Нажмите <b>🚀 Поехали</b>, чтобы возобновить работу.",
+        parse_mode="HTML",
+        reply_markup=get_persistent_keyboard(bot_active=False)
+    )
+
+
+@router.message(F.text == "🚀 Поехали")
+async def text_start_button(message: Message):
+    """Handle 'Start' button press - resumes bot for user."""
+    user_id = message.from_user.id
+
+    # Update bot status to active
+    await database.update_bot_active(user_id, True)
+
+    # Send confirmation with updated keyboard
+    await message.answer(
+        "🚀 <b>Бот запущен!</b>\n\n"
+        "Все системы активированы:\n"
+        "• ✅ Мониторинг транзакций включён\n"
+        "• ✅ Уведомления активны\n"
+        "• ✅ Все функции доступны\n\n"
+        "Бот работает в штатном режиме!",
+        parse_mode="HTML",
+        reply_markup=get_persistent_keyboard(bot_active=True)
+    )
 
 
 @router.message(Command("check"))
