@@ -599,23 +599,15 @@ class PostgresDatabase:
             True if incremented successfully
         """
         async with self.pool.acquire() as conn:
-            # Ensure user settings exist
+            # Use UPSERT to ensure user exists and increment counter in one atomic operation
+            # COALESCE handles NULL values from old migrations
             await conn.execute(
                 """
                 INSERT INTO user_settings (user_id, whale_checks_today, last_whale_check_date)
-                VALUES ($1, 0, CURRENT_DATE)
-                ON CONFLICT (user_id) DO NOTHING
-                """,
-                user_id
-            )
-
-            # Increment counter (COALESCE handles NULL values from old migrations)
-            await conn.execute(
-                """
-                UPDATE user_settings
-                SET whale_checks_today = COALESCE(whale_checks_today, 0) + 1,
+                VALUES ($1, 1, CURRENT_DATE)
+                ON CONFLICT (user_id) DO UPDATE
+                SET whale_checks_today = COALESCE(user_settings.whale_checks_today, 0) + 1,
                     last_whale_check_date = CURRENT_DATE
-                WHERE user_id = $1
                 """,
                 user_id
             )

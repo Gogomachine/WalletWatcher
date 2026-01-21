@@ -612,22 +612,15 @@ class Database:
             True if incremented successfully
         """
         async with aiosqlite.connect(self.db_path) as db:
-            # Ensure user settings exist
+            # Use UPSERT to ensure user exists and increment counter in one operation
+            # COALESCE handles NULL values from old migrations
             await db.execute(
                 """
-                INSERT OR IGNORE INTO user_settings (user_id, whale_checks_today, last_whale_check_date)
-                VALUES (?, 0, DATE('now'))
-                """,
-                (user_id,)
-            )
-
-            # Increment counter (COALESCE handles NULL values from old migrations)
-            await db.execute(
-                """
-                UPDATE user_settings
+                INSERT INTO user_settings (user_id, whale_checks_today, last_whale_check_date)
+                VALUES (?, 1, DATE('now'))
+                ON CONFLICT(user_id) DO UPDATE
                 SET whale_checks_today = COALESCE(whale_checks_today, 0) + 1,
                     last_whale_check_date = DATE('now')
-                WHERE user_id = ?
                 """,
                 (user_id,)
             )
