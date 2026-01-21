@@ -323,16 +323,20 @@ async def text_start_button(message: Message):
     """Handle 'Start' button press - resumes bot for user."""
     user_id = message.from_user.id
 
+    # Reset monitoring state - start from scratch
+    await database.reset_user_monitoring(user_id)
+
     # Update bot status to active
     await database.update_bot_active(user_id, True)
 
     # Send confirmation with updated keyboard
     await message.answer(
-        "🚀 <b>Бот запущен!</b>\n\n"
+        "🚀 <b>Бот запущен с чистого листа!</b>\n\n"
         "Все системы активированы:\n"
         "• ✅ Мониторинг транзакций включён\n"
         "• ✅ Уведомления активны\n"
-        "• ✅ Все функции доступны\n\n"
+        "• ✅ Все функции доступны\n"
+        "• 🔄 Отслеживание начинается с этого момента\n\n"
         "Бот работает в штатном режиме!",
         parse_mode="HTML",
         reply_markup=get_persistent_keyboard(bot_active=True)

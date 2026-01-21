@@ -215,6 +215,25 @@ class Database:
             )
             await db.commit()
 
+    async def reset_user_monitoring(self, user_id: int):
+        """Reset monitoring state for all user's addresses (clear last signatures).
+
+        This makes the bot start monitoring from current moment, ignoring old transactions.
+
+        Args:
+            user_id: Telegram user ID
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                UPDATE tracked_addresses
+                SET last_signature = NULL, last_checked = NULL
+                WHERE user_id = ?
+                """,
+                (user_id,)
+            )
+            await db.commit()
+
     async def get_user_settings(self, user_id: int) -> Dict:
         """Get user settings.
 
