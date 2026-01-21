@@ -65,19 +65,31 @@ class AddressMonitor:
             await asyncio.sleep(self.interval)
 
     async def _check_all_addresses(self):
-        """Check all tracked addresses for new transactions."""
+        """Check all tracked addresses for new transactions (optimized with batching)."""
         # Get all tracked addresses
         tracked = await self.database.get_all_tracked_addresses()
 
         if not tracked:
             return
 
-        # Check each address
-        for record in tracked:
-            try:
-                await self._check_address(record)
-            except Exception as e:
-                print(f"Error checking address {record['address']}: {e}")
+        # Split into batches for parallel processing (50 addresses per batch)
+        batch_size = 50
+        batches = [tracked[i:i + batch_size] for i in range(0, len(tracked), batch_size)]
+
+        print(f"🔍 Checking {len(tracked)} addresses in {len(batches)} batches...")
+
+        # Process each batch in parallel
+        for batch_num, batch in enumerate(batches, 1):
+            # Check all addresses in batch concurrently
+            tasks = [self._check_address(record) for record in batch]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Log any errors
+            errors = sum(1 for r in results if isinstance(r, Exception))
+            if errors > 0:
+                print(f"⚠️  Batch {batch_num}/{len(batches)}: {errors} errors out of {len(batch)} addresses")
+            else:
+                print(f"✅ Batch {batch_num}/{len(batches)}: all {len(batch)} addresses checked")
 
     async def _check_address(self, record: dict):
         """Check a single address for new transactions.
