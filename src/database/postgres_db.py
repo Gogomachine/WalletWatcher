@@ -614,6 +614,37 @@ class PostgresDatabase:
             )
             return True
 
+    async def decrement_whale_check(self, user_id: int) -> bool:
+        """Decrement whale check counter (grant additional attempt).
+
+        Args:
+            user_id: Telegram user ID
+
+        Returns:
+            True if decremented successfully
+        """
+        async with self.pool.acquire() as conn:
+            # Ensure user settings exist
+            await conn.execute(
+                """
+                INSERT INTO user_settings (user_id, whale_checks_today, last_whale_check_date)
+                VALUES ($1, 0, CURRENT_DATE)
+                ON CONFLICT (user_id) DO NOTHING
+                """,
+                user_id
+            )
+
+            # Decrement counter (but don't go below 0)
+            await conn.execute(
+                """
+                UPDATE user_settings
+                SET whale_checks_today = GREATEST(0, whale_checks_today - 1)
+                WHERE user_id = $1
+                """,
+                user_id
+            )
+            return True
+
     async def update_premium_status(self, user_id: int, is_premium: bool) -> bool:
         """Update premium status for user.
 

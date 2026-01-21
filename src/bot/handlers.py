@@ -6,7 +6,10 @@ import random
 from pathlib import Path
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, CallbackQuery, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    Message, CallbackQuery, FSInputFile, InlineKeyboardMarkup,
+    InlineKeyboardButton, LabeledPrice, PreCheckoutQuery
+)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ChatType
@@ -1506,28 +1509,32 @@ async def buy_whale_check_callback(callback: CallbackQuery):
         await callback.answer("❌ Ошибка в цене", show_alert=True)
         return
 
-    await callback.answer(
-        f"💫 Покупка дополнительной попытки за {price_stars} звезд будет доступна в следующей версии!\n\n"
-        f"Сейчас эта функция в разработке. Следите за обновлениями!",
-        show_alert=True
+    user_id = callback.from_user.id
+
+    # Create invoice for Telegram Stars
+    prices = [LabeledPrice(label="Дополнительная попытка 'Подсмотреть'", amount=price_stars)]
+
+    # Delete previous message and send invoice
+    try:
+        await callback.message.delete()
+    except:
+        pass
+
+    await callback.message.answer_invoice(
+        title="🎰 Дополнительная попытка",
+        description=f"Купить 1 дополнительную попытку 'Подсмотреть' в лотерее.\n\nВы сможете найти адрес с призовым балансом!",
+        payload=f"whale_check:{user_id}:{price_stars}",
+        provider_token="",  # Empty for Telegram Stars
+        currency="XTR",  # Telegram Stars currency code
+        prices=prices
     )
 
-    # TODO: Implement Telegram Stars payment
-    # from aiogram.types import LabeledPrice
-    # prices = [LabeledPrice(label="Дополнительная попытка 'Подсмотреть'", amount=price_stars)]
-    # await callback.message.answer_invoice(
-    #     title="Дополнительная попытка",
-    #     description=f"Купить 1 дополнительную попытку 'Подсмотреть' за {price_stars} звезд",
-    #     payload=f"whale_check_{callback.from_user.id}",
-    #     provider_token="",  # Empty for Telegram Stars
-    #     currency="XTR",  # Telegram Stars currency
-    #     prices=prices
-    # )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "buy_premium")
 async def buy_premium_callback(callback: CallbackQuery):
-    """Handle premium subscription purchase."""
+    """Handle premium subscription purchase (coming soon)."""
     await callback.answer(
         "💎 Премиум подписка скоро будет доступна!\n\n"
         "Преимущества премиум:\n"
@@ -1539,7 +1546,60 @@ async def buy_premium_callback(callback: CallbackQuery):
     )
 
     # TODO: Implement premium subscription
-    # Price TBD - maybe 100 stars/month or similar
+    # Price TBD - maybe 100-500 stars/month
+
+
+@router.pre_checkout_query()
+async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
+    """
+    Handle pre-checkout query (mandatory for Telegram payments).
+    This is called before the user confirms payment.
+    """
+    # Always approve the checkout
+    # You can add validation logic here if needed
+    await pre_checkout_query.answer(ok=True)
+
+
+@router.message(F.successful_payment)
+async def process_successful_payment(message: Message):
+    """
+    Handle successful payment.
+    Grant the user additional whale check attempt.
+    """
+    payment = message.successful_payment
+    user_id = message.from_user.id
+
+    # Parse payload to determine what was purchased
+    payload = payment.invoice_payload  # Format: "whale_check:user_id:price"
+
+    try:
+        parts = payload.split(":")
+        if len(parts) >= 1 and parts[0] == "whale_check":
+            # User bought additional whale check
+            # Decrement their counter by 1 (giving them 1 more attempt)
+            await database.decrement_whale_check(user_id)
+
+            checks_used, max_checks = await database.get_whale_checks_remaining(user_id)
+            remaining = max_checks - checks_used
+
+            await message.answer(
+                f"✅ <b>Оплата успешна!</b>\n\n"
+                f"💫 Вам начислена 1 дополнительная попытка 'Подсмотреть'\n"
+                f"👀 Осталось попыток сегодня: {remaining}\n\n"
+                f"<i>Спасибо за поддержку! Удачи в поиске призового адреса! 🎰</i>",
+                parse_mode="HTML"
+            )
+
+            # Log payment for analytics
+            print(f"💰 Payment received: {payment.total_amount} XTR from user {user_id}")
+
+    except Exception as e:
+        print(f"❌ Error processing payment: {e}")
+        await message.answer(
+            "⚠️ Оплата прошла успешно, но произошла ошибка при начислении попытки.\n\n"
+            "Пожалуйста, свяжитесь с поддержкой.",
+            parse_mode="HTML"
+        )
 
 
 # Автоматическая проверка адресов в сообщениях

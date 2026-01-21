@@ -627,6 +627,37 @@ class Database:
             await db.commit()
             return True
 
+    async def decrement_whale_check(self, user_id: int) -> bool:
+        """Decrement whale check counter (grant additional attempt).
+
+        Args:
+            user_id: Telegram user ID
+
+        Returns:
+            True if decremented successfully
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            # Ensure user settings exist
+            await db.execute(
+                """
+                INSERT OR IGNORE INTO user_settings (user_id, whale_checks_today, last_whale_check_date)
+                VALUES (?, 0, DATE('now'))
+                """,
+                (user_id,)
+            )
+
+            # Decrement counter (but don't go below 0)
+            await db.execute(
+                """
+                UPDATE user_settings
+                SET whale_checks_today = MAX(0, whale_checks_today - 1)
+                WHERE user_id = ?
+                """,
+                (user_id,)
+            )
+            await db.commit()
+            return True
+
     async def update_premium_status(self, user_id: int, is_premium: bool) -> bool:
         """Update premium status for user.
 
