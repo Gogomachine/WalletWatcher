@@ -10,7 +10,7 @@ def get_main_menu() -> InlineKeyboardMarkup:
         Main menu inline keyboard
     """
     buttons = [
-        [InlineKeyboardButton(text="📊 Проверить адрес", callback_data="menu_check")],
+        [InlineKeyboardButton(text="👤 Профиль", callback_data="menu_profile")],
         [
             InlineKeyboardButton(text="➕ Добавить адрес", callback_data="menu_add"),
             InlineKeyboardButton(text="📋 Мои адреса", callback_data="menu_list")
@@ -260,7 +260,7 @@ def get_persistent_keyboard(bot_active: bool = True) -> ReplyKeyboardMarkup:
 
     buttons = [
         [
-            KeyboardButton(text="📊 Проверить адрес"),
+            KeyboardButton(text="👤 Профиль"),
             KeyboardButton(text="📋 Отслеживание")
         ],
         [

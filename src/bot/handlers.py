@@ -116,19 +116,21 @@ async def cmd_start(message: Message):
     # Если в группе, отвечаем кратко
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await message.reply(
-            "👋 Привет! Я бот для отслеживания Solana адресов.\n\n"
+            "👋 Привет! Я бот для отслеживания всяких разных адресов.\n\n"
             "Отправьте адрес или используйте /menu для просмотра команд.",
             reply_markup=get_persistent_keyboard(bot_active=bool(bot_active))
         )
     else:
         await message.answer(
-            f"👋 Привет, {message.from_user.first_name}!\n\n"
-            f"Я бот для отслеживания Solana адресов.\n\n"
-            f"Я могу:\n"
-            f"• Показать информацию о любом адресе\n"
-            f"• Отслеживать адреса в реальном времени\n"
-            f"• Уведомлять о новых транзакциях\n\n"
-            f"Используйте меню ниже для навигации:",
+            "👋 Привет!\n\n"
+            "Я бот для отслеживания всяких разных адресов. (пока только солана :) )\n\n"
+            "Я могу:\n"
+            "• Показать информацию о любом адресе со скриншотиками прикольно, удобно можно сразу в эксплорер\n"
+            "• Отслеживать адреса в реальном времени, создавать группы адресов, баланс группы можно тоже посмотреть\n"
+            "• Уведомлять о новых транзакциях тоже со скриншотиками\n"
+            "• Можно нажать СТОП чтоб никто вас не доставал\n"
+            "• Пикантный режим \"Подсмотреть\", с конкурсами и тамадой\n\n"
+            "Используйте меню ниже для навигации:",
             reply_markup=get_persistent_keyboard(bot_active=bool(bot_active))
         )
         # Send inline menu after persistent keyboard
@@ -186,12 +188,29 @@ async def cmd_menu(message: Message):
     )
 
 
-@router.message(F.text == "📊 Проверить адрес")
-async def text_check_button(message: Message):
-    """Handle 'Check address' button press."""
+@router.message(F.text == "👤 Профиль")
+async def text_profile_button(message: Message):
+    """Handle 'Profile' button press."""
+    user_id = message.from_user.id
+    username = message.from_user.username
+    first_name = message.from_user.first_name
+
+    # Get user stats
+    count = await database.get_tracked_address_count(user_id)
+    groups = await database.get_user_groups(user_id)
+
+    username_str = f"@{username}" if username else "Не указан"
+
     await message.answer(
-        "📊 <b>Проверить адрес</b>\n\n"
-        "Отправьте Solana адрес для проверки:",
+        f"👤 <b>Ваш профиль</b>\n\n"
+        f"👨‍💻 <b>Имя:</b> {first_name}\n"
+        f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
+        f"📝 <b>Username:</b> {username_str}\n\n"
+        f"📊 <b>Статистика:</b>\n"
+        f"📋 Отслеживаемых адресов: {count}\n"
+        f"📁 Групп: {len(groups)}\n\n"
+        f"💎 <b>Подписка:</b> Бесплатная\n"
+        f"<i>(Премиум функции скоро появятся)</i>",
         parse_mode="HTML"
     )
 
@@ -560,6 +579,35 @@ async def menu_analysis_callback(callback: CallbackQuery):
         "Скоро здесь появятся отчеты безопасности и настоящий АМЛ как у крутышек 😎",
         reply_markup=get_main_menu(),
         parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu_profile")
+async def menu_profile_callback(callback: CallbackQuery):
+    """Handle 'Profile' menu button."""
+    user_id = callback.from_user.id
+    username = callback.from_user.username
+    first_name = callback.from_user.first_name
+
+    # Get user stats
+    count = await database.get_tracked_address_count(user_id)
+    groups = await database.get_user_groups(user_id)
+
+    username_str = f"@{username}" if username else "Не указан"
+
+    await callback.message.edit_text(
+        f"👤 <b>Ваш профиль</b>\n\n"
+        f"👨‍💻 <b>Имя:</b> {first_name}\n"
+        f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
+        f"📝 <b>Username:</b> {username_str}\n\n"
+        f"📊 <b>Статистика:</b>\n"
+        f"📋 Отслеживаемых адресов: {count}\n"
+        f"📁 Групп: {len(groups)}\n\n"
+        f"💎 <b>Подписка:</b> Бесплатная\n"
+        f"<i>(Премиум функции скоро появятся)</i>",
+        parse_mode="HTML",
+        reply_markup=get_main_menu()
     )
     await callback.answer()
 
