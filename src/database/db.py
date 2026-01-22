@@ -614,12 +614,16 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             # Use UPSERT to ensure user exists and increment counter in one operation
             # COALESCE handles NULL values from old migrations
+            # CASE handles day change - reset counter to 1 if date changed
             await db.execute(
                 """
                 INSERT INTO user_settings (user_id, whale_checks_today, last_whale_check_date)
                 VALUES (?, 1, DATE('now'))
                 ON CONFLICT(user_id) DO UPDATE
-                SET whale_checks_today = COALESCE(whale_checks_today, 0) + 1,
+                SET whale_checks_today = CASE
+                        WHEN last_whale_check_date IS NULL OR last_whale_check_date != DATE('now') THEN 1
+                        ELSE COALESCE(whale_checks_today, 0) + 1
+                    END,
                     last_whale_check_date = DATE('now')
                 """,
                 (user_id,)
