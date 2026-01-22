@@ -293,10 +293,10 @@ def get_whale_limit_exceeded_keyboard(checks_used: int) -> InlineKeyboardMarkup:
     # 4th check = 1000 stars
     # 5th check = 2000 stars
     # 6th check = 3000 stars, etc.
-    next_check_num = checks_used + 1
+    next_check_num = checks_used + 1000
     free_checks = 3  # Number of free checks
     paid_check_index = next_check_num - free_checks  # 1, 2, 3...
-    price_stars = paid_check_index * 1
+    price_stars = paid_check_index * 1000
 
     buttons = [
         [
