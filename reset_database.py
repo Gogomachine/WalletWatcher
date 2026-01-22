@@ -11,7 +11,7 @@ from pathlib import Path
 
 async def reset_sqlite():
     """Очистка SQLite базы данных."""
-    db_path = Path("data/wallet_watcher.db")
+    db_path = Path("data/bot.db")
 
     if db_path.exists():
         print(f"🗑️  Удаляю файл базы данных: {db_path}")

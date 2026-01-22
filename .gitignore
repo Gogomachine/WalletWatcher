@@ -30,7 +30,14 @@ wheels/
 *.db
 *.sqlite
 *.sqlite3
-data/
+data/*.db
+
+# Screenshots
+screenshots/
+
+# Session files (Telethon/Pyrogram)
+*.session
+*.session-journal
 
 # IDE
 .vscode/
@@ -42,5 +49,3 @@ data/
 # OS
 .DS_Store
 Thumbs.db
-data/whale_addresses.txt
-data/whale_addresses.txt
