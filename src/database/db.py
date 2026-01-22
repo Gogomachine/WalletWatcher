@@ -565,8 +565,21 @@ class Database:
         """
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
+
+            # First, reset counter if it's a new day (using DB's DATE('now') for consistency)
+            await db.execute(
+                """
+                UPDATE user_settings
+                SET whale_checks_today = 0, last_whale_check_date = DATE('now')
+                WHERE user_id = ?
+                AND (last_whale_check_date IS NULL OR last_whale_check_date != DATE('now'))
+                """,
+                (user_id,)
+            )
+            await db.commit()
+
             async with db.execute(
-                "SELECT whale_checks_today, last_whale_check_date, is_premium FROM user_settings WHERE user_id = ?",
+                "SELECT whale_checks_today, is_premium FROM user_settings WHERE user_id = ?",
                 (user_id,)
             ) as cursor:
                 row = await cursor.fetchone()
@@ -581,21 +594,7 @@ class Database:
                     return (0, 3)
 
                 checks_today = row['whale_checks_today'] or 0
-                last_check_date = row['last_whale_check_date']
                 is_premium = row['is_premium'] or 0
-
-                # Check if it's a new day - reset counter
-                from datetime import date
-                today = date.today().isoformat()
-
-                if last_check_date != today:
-                    # New day - reset counter
-                    await db.execute(
-                        "UPDATE user_settings SET whale_checks_today = 0, last_whale_check_date = DATE('now') WHERE user_id = ?",
-                        (user_id,)
-                    )
-                    await db.commit()
-                    checks_today = 0
 
                 # Max checks: 3 for free, 5 for premium
                 max_checks = 5 if is_premium else 3

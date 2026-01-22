@@ -555,8 +555,19 @@ class PostgresDatabase:
             Tuple of (checks_used_today, max_checks)
         """
         async with self.pool.acquire() as conn:
+            # First, reset counter if it's a new day (using DB's CURRENT_DATE for consistency)
+            await conn.execute(
+                """
+                UPDATE user_settings
+                SET whale_checks_today = 0, last_whale_check_date = CURRENT_DATE
+                WHERE user_id = $1
+                AND (last_whale_check_date IS NULL OR last_whale_check_date != CURRENT_DATE)
+                """,
+                user_id
+            )
+
             row = await conn.fetchrow(
-                "SELECT whale_checks_today, last_whale_check_date, is_premium FROM user_settings WHERE user_id = $1",
+                "SELECT whale_checks_today, is_premium FROM user_settings WHERE user_id = $1",
                 user_id
             )
 
@@ -569,20 +580,7 @@ class PostgresDatabase:
                 return (0, 3)
 
             checks_today = row['whale_checks_today'] or 0
-            last_check_date = row['last_whale_check_date']
             is_premium = row['is_premium'] or False
-
-            # Check if it's a new day - reset counter
-            from datetime import date
-            today = date.today()
-
-            if last_check_date != today:
-                # New day - reset counter
-                await conn.execute(
-                    "UPDATE user_settings SET whale_checks_today = 0, last_whale_check_date = CURRENT_DATE WHERE user_id = $1",
-                    user_id
-                )
-                checks_today = 0
 
             # Max checks: 3 for free, 5 for premium
             max_checks = 5 if is_premium else 3
