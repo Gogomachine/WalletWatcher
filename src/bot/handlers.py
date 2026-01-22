@@ -1,7 +1,5 @@
 """Bot command handlers."""
 
-import os
-import re
 import random
 from pathlib import Path
 from aiogram import Router, F
@@ -23,7 +21,6 @@ from .keyboards import (
     get_whale_result_keyboard,
     get_persistent_keyboard,
     get_group_addresses_keyboard,
-    get_select_addresses_keyboard,
     get_whale_limit_exceeded_keyboard
 )
 from ..blockchain.universal_client import UniversalBlockchainClient, detect_address_type
@@ -55,6 +52,109 @@ PEEK_PHRASES = [
 def get_random_peek_phrase() -> str:
     """Get random peek phrase for screenshot process."""
     return random.choice(PEEK_PHRASES)
+
+
+async def _perform_whale_check(message: Message, user_id: int, show_remaining: bool = True) -> None:
+    """Perform whale address discovery and display results.
+
+    Common logic for /whale command, text button, and callback.
+
+    Args:
+        message: Message object to reply to
+        user_id: Telegram user ID
+        show_remaining: Whether to show remaining attempts in result
+    """
+    # Check daily limit
+    checks_used, max_checks = await database.get_whale_checks_remaining(user_id)
+    remaining = max_checks - checks_used
+
+    if remaining <= 0:
+        # Limit exceeded - show payment options
+        settings = await database.get_user_settings(user_id)
+        is_premium = settings.get('is_premium', 0)
+
+        limit_msg = (
+            "⛔ <b>Лимит исчерпан</b>\n\n"
+            f"Вы использовали все {'5' if is_premium else '3'} бесплатные попытки на сегодня.\n"
+            f"Попыток использовано: {checks_used}\n\n"
+            "💡 Вы можете:\n"
+            "• Купить дополнительную попытку за Telegram Stars\n"
+            "• Оформить премиум подписку (5 попыток/день)\n"
+            "• Вернуться завтра (лимит обнуляется в 00:00)"
+        )
+
+        await message.answer(
+            limit_msg,
+            parse_mode="HTML",
+            reply_markup=get_whale_limit_exceeded_keyboard(checks_used)
+        )
+        return
+
+    # Increment counter before showing
+    await database.increment_whale_check(user_id)
+
+    status_msg = await message.answer(
+        f"👀 Подсматриваю...\n\n"
+        f"<i>Осталось попыток сегодня: {remaining - 1}</i>",
+        parse_mode="HTML"
+    )
+
+    # Discover random whale address
+    address = await blockchain_client.discover_whale_address(min_balance_usd=100000)
+
+    if not address:
+        await status_msg.edit_text(
+            "❌ <b>Не удалось подсмотреть</b>\n\n"
+            "Попробуйте позже.",
+            parse_mode="HTML"
+        )
+        return
+
+    # Get wallet info
+    await status_msg.edit_text("👀 Получаю информацию...")
+    info = await blockchain_client.get_wallet_info(address)
+
+    if "error" in info:
+        await status_msg.edit_text(
+            f"❌ Ошибка при получении информации: {info['error']}",
+            parse_mode="HTML"
+        )
+        return
+
+    # Format wallet info
+    msg = "👀 <b>Подсмотрел!</b>\n\n"
+    msg += format_wallet_info(info)
+    if show_remaining:
+        msg += f"\n\n<i>💫 Осталось попыток сегодня: {remaining - 1}</i>"
+
+    # Try to get screenshot from Solscan
+    await status_msg.edit_text(get_random_peek_phrase())
+    screenshot_path = await take_solscan_screenshot(address)
+
+    if screenshot_path and Path(screenshot_path).exists():
+        # Send photo with caption and favorite button
+        photo = FSInputFile(screenshot_path)
+        await message.answer_photo(
+            photo=photo,
+            caption=msg,
+            parse_mode="HTML",
+            reply_markup=get_whale_result_keyboard(address)
+        )
+        await status_msg.delete()
+
+        # Clean up screenshot file
+        try:
+            Path(screenshot_path).unlink()
+        except Exception:
+            pass
+    else:
+        # Fallback to text only if screenshot failed
+        await status_msg.edit_text(
+            msg,
+            disable_web_page_preview=True,
+            parse_mode="HTML",
+            reply_markup=get_whale_result_keyboard(address)
+        )
 
 
 class AddressStates(StatesGroup):
@@ -254,98 +354,7 @@ async def text_tracking_button(message: Message):
 @router.message(F.text == "👀 Подсмотреть")
 async def text_whale_button(message: Message):
     """Handle 'Peek' button press with daily limit check."""
-    user_id = message.from_user.id
-
-    # Check daily limit
-    checks_used, max_checks = await database.get_whale_checks_remaining(user_id)
-    remaining = max_checks - checks_used
-
-    if remaining <= 0:
-        # Limit exceeded - show payment options
-        settings = await database.get_user_settings(user_id)
-        is_premium = settings.get('is_premium', 0)
-
-        limit_msg = (
-            "⛔ <b>Лимит исчерпан</b>\n\n"
-            f"Вы использовали все {'5' if is_premium else '3'} бесплатные попытки на сегодня.\n"
-            f"Попыток использовано: {checks_used}\n\n"
-            "💡 Вы можете:\n"
-            "• Купить дополнительную попытку за Telegram Stars\n"
-            "• Оформить премиум подписку (5 попыток/день)\n"
-            "• Вернуться завтра (лимит обнуляется в 00:00)"
-        )
-
-        await message.answer(
-            limit_msg,
-            parse_mode="HTML",
-            reply_markup=get_whale_limit_exceeded_keyboard(checks_used)
-        )
-        return
-
-    # Increment counter before showing
-    await database.increment_whale_check(user_id)
-
-    status_msg = await message.answer(
-        f"👀 Подсматриваю...\n\n"
-        f"<i>Осталось попыток сегодня: {remaining - 1}</i>",
-        parse_mode="HTML"
-    )
-
-    # Discover random whale address
-    address = await blockchain_client.discover_whale_address(min_balance_usd=100000)
-
-    if not address:
-        await status_msg.edit_text(
-            "❌ <b>Не удалось подсмотреть</b>\n\n"
-            "Попробуйте позже.",
-            parse_mode="HTML"
-        )
-        return
-
-    # Get wallet info
-    await status_msg.edit_text("👀 Получаю информацию...")
-    info = await blockchain_client.get_wallet_info(address)
-
-    if "error" in info:
-        await status_msg.edit_text(
-            f"❌ Ошибка при получении информации: {info['error']}",
-            parse_mode="HTML"
-        )
-        return
-
-    # Format wallet info
-    msg = "👀 <b>Подсмотрел!</b>\n\n"
-    msg += format_wallet_info(info)
-    msg += f"\n\n<i>💫 Осталось попыток сегодня: {remaining - 1}</i>"
-
-    # Try to get screenshot from Solscan
-    await status_msg.edit_text(get_random_peek_phrase())
-    screenshot_path = await take_solscan_screenshot(address)
-
-    if screenshot_path and Path(screenshot_path).exists():
-        # Send photo with caption and favorite button
-        photo = FSInputFile(screenshot_path)
-        await message.answer_photo(
-            photo=photo,
-            caption=msg,
-            parse_mode="HTML",
-            reply_markup=get_whale_result_keyboard(address)
-        )
-        await status_msg.delete()
-
-        # Clean up screenshot file
-        try:
-            Path(screenshot_path).unlink()
-        except:
-            pass
-    else:
-        # Fallback to text only if screenshot failed
-        await status_msg.edit_text(
-            msg,
-            disable_web_page_preview=True,
-            parse_mode="HTML",
-            reply_markup=get_whale_result_keyboard(address)
-        )
+    await _perform_whale_check(message, message.from_user.id)
 
 
 @router.message(F.text == "🔍 Анализ")
@@ -505,62 +514,7 @@ async def cmd_analysis(message: Message):
 @router.message(Command("whale"))
 async def cmd_whale(message: Message):
     """Handle /whale command - peek at random whale address."""
-    status_msg = await message.reply("👀 Подсматриваю...")
-
-    # Discover random whale address (min $100,000 balance)
-    address = await blockchain_client.discover_whale_address(min_balance_usd=100000)
-
-    if not address:
-        await status_msg.edit_text(
-            "❌ <b>Не удалось подсмотреть</b>\n\n"
-            "Попробуйте позже.",
-            parse_mode="HTML"
-        )
-        return
-
-    # Get wallet info
-    await status_msg.edit_text("👀 Получаю информацию...")
-    info = await blockchain_client.get_wallet_info(address)
-
-    if "error" in info:
-        await status_msg.edit_text(
-            f"❌ Ошибка при получении информации: {info['error']}",
-            parse_mode="HTML"
-        )
-        return
-
-    # Format wallet info
-    msg = "👀 <b>Подсмотрел!</b>\n\n"
-    msg += format_wallet_info(info)
-
-    # Try to get screenshot from Solscan
-    await status_msg.edit_text(get_random_peek_phrase())
-    screenshot_path = await take_solscan_screenshot(address)
-
-    if screenshot_path and Path(screenshot_path).exists():
-        # Send photo with caption and favorite button
-        photo = FSInputFile(screenshot_path)
-        await message.answer_photo(
-            photo=photo,
-            caption=msg,
-            parse_mode="HTML",
-            reply_markup=get_whale_result_keyboard(address)
-        )
-        await status_msg.delete()
-
-        # Clean up screenshot file
-        try:
-            Path(screenshot_path).unlink()
-        except:
-            pass
-    else:
-        # Fallback to text only if screenshot failed
-        await status_msg.edit_text(
-            msg,
-            disable_web_page_preview=True,
-            parse_mode="HTML",
-            reply_markup=get_whale_result_keyboard(address)
-        )
+    await _perform_whale_check(message, message.from_user.id)
 
 
 # Callback handlers для inline кнопок
@@ -675,102 +629,9 @@ async def menu_settings_callback(callback: CallbackQuery):
 @router.callback_query(F.data == "menu_whale")
 async def menu_whale_callback(callback: CallbackQuery):
     """Handle 'Peek' menu button with daily limit check."""
-    user_id = callback.from_user.id
-
-    # Check daily limit
-    checks_used, max_checks = await database.get_whale_checks_remaining(user_id)
-    remaining = max_checks - checks_used
-
-    if remaining <= 0:
-        # Limit exceeded - show payment options
-        settings = await database.get_user_settings(user_id)
-        is_premium = settings.get('is_premium', 0)
-
-        limit_msg = (
-            "⛔ <b>Лимит исчерпан</b>\n\n"
-            f"Вы использовали все {'5' if is_premium else '3'} бесплатные попытки на сегодня.\n"
-            f"Попыток использовано: {checks_used}\n\n"
-            "💡 Вы можете:\n"
-            "• Купить дополнительную попытку за Telegram Stars\n"
-            "• Оформить премиум подписку (5 попыток/день)\n"
-            "• Вернуться завтра (лимит обнуляется в 00:00)"
-        )
-
-        await callback.message.edit_text(
-            limit_msg,
-            parse_mode="HTML",
-            reply_markup=get_whale_limit_exceeded_keyboard(checks_used)
-        )
-        await callback.answer()
-        return
-
-    # Increment counter before showing
-    await database.increment_whale_check(user_id)
-
-    await callback.message.edit_text(
-        f"👀 Подсматриваю...\n\n"
-        f"<i>Осталось попыток сегодня: {remaining - 1}</i>",
-        parse_mode="HTML"
-    )
     await callback.answer()
-
-    # Discover random whale address (min $100,000 balance)
-    address = await blockchain_client.discover_whale_address(min_balance_usd=100000)
-
-    if not address:
-        await callback.message.edit_text(
-            "❌ <b>Не удалось подсмотреть</b>\n\n"
-            "Попробуйте позже.",
-            reply_markup=get_main_menu(),
-            parse_mode="HTML"
-        )
-        return
-
-    # Get wallet info
-    await callback.message.edit_text("👀 Получаю информацию...")
-    info = await blockchain_client.get_wallet_info(address)
-
-    if "error" in info:
-        await callback.message.edit_text(
-            f"❌ Ошибка при получении информации: {info['error']}",
-            reply_markup=get_main_menu(),
-            parse_mode="HTML"
-        )
-        return
-
-    # Format wallet info
-    msg = "👀 <b>Подсмотрел!</b>\n\n"
-    msg += format_wallet_info(info)
-    msg += f"\n\n<i>💫 Осталось попыток сегодня: {remaining - 1}</i>"
-
-    # Try to get screenshot from Solscan
-    await callback.message.edit_text(get_random_peek_phrase())
-    screenshot_path = await take_solscan_screenshot(address)
-
-    if screenshot_path and Path(screenshot_path).exists():
-        # Delete status message and send photo with caption
-        await callback.message.delete()
-        photo = FSInputFile(screenshot_path)
-        await callback.message.answer_photo(
-            photo=photo,
-            caption=msg,
-            parse_mode="HTML",
-            reply_markup=get_whale_result_keyboard(address)
-        )
-
-        # Clean up screenshot file
-        try:
-            Path(screenshot_path).unlink()
-        except:
-            pass
-    else:
-        # Fallback to text only if screenshot failed
-        await callback.message.edit_text(
-            msg,
-            disable_web_page_preview=True,
-            parse_mode="HTML",
-            reply_markup=get_whale_result_keyboard(address)
-        )
+    # Use message from callback to send whale check results
+    await _perform_whale_check(callback.message, callback.from_user.id)
 
 
 @router.callback_query(F.data == "cancel")
@@ -871,7 +732,7 @@ async def process_address(message: Message, state: FSMContext):
             # Clean up screenshot file
             try:
                 Path(screenshot_path).unlink()
-            except:
+            except Exception:
                 pass
         else:
             # Fallback to text only
@@ -896,7 +757,7 @@ async def process_address(message: Message, state: FSMContext):
             # Clean up screenshot file
             try:
                 Path(screenshot_path).unlink()
-            except:
+            except Exception:
                 pass
         else:
             # Fallback to text only
@@ -970,7 +831,7 @@ async def check_address(message: Message, address: str):
         # Clean up screenshot file
         try:
             Path(screenshot_path).unlink()
-        except:
+        except Exception:
             pass
     else:
         # Fallback to text only if screenshot failed
@@ -1057,7 +918,7 @@ async def check_address_callback(callback: CallbackQuery):
         # Clean up screenshot file
         try:
             Path(screenshot_path).unlink()
-        except:
+        except Exception:
             pass
     else:
         # Fallback to text only if screenshot failed
@@ -1505,7 +1366,7 @@ async def buy_whale_check_callback(callback: CallbackQuery):
     """Handle purchase of additional whale check via Telegram Stars."""
     try:
         price_stars = int(callback.data.split("_")[-1])
-    except:
+    except Exception:
         await callback.answer("❌ Ошибка в цене", show_alert=True)
         return
 
@@ -1517,7 +1378,7 @@ async def buy_whale_check_callback(callback: CallbackQuery):
     # Delete previous message and send invoice
     try:
         await callback.message.delete()
-    except:
+    except Exception:
         pass
 
     await callback.message.answer_invoice(

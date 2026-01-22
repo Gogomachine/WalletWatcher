@@ -77,7 +77,7 @@ class SolscanScreenshot:
                         overview_box = box
                         print(f"✓ Found Overview at level {level}: {box}")
                         break
-                except:
+                except Exception:
                     continue
 
             # Save screenshot
@@ -160,10 +160,10 @@ class SolscanScreenshot:
             # Look for "Legacy Mode" or "TransferChecked" text
             try:
                 instruction_locator = page.locator('text=Legacy Mode').first
-            except:
+            except Exception:
                 try:
                     instruction_locator = page.locator('text=TransferChecked').first
-                except:
+                except Exception:
                     instruction_locator = page.locator('text=Transfer').first
 
             # Navigate up to find the instruction card container
@@ -179,7 +179,7 @@ class SolscanScreenshot:
                         instruction_box = box
                         print(f"✓ Found instruction block at level {level}: {box}")
                         break
-                except:
+                except Exception:
                     continue
 
             # Save screenshot

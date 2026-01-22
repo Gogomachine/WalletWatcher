@@ -106,7 +106,7 @@ class OptimizedScreenshotService:
                         if box and box['height'] > 150 and box['height'] < 600:
                             overview_box = box
                             break
-                    except:
+                    except Exception:
                         continue
 
                 # Save screenshot
@@ -140,7 +140,7 @@ class OptimizedScreenshotService:
                                     }
                                 )
                                 break
-                        except:
+                        except Exception:
                             continue
 
                 return str(screenshot_path)
@@ -189,10 +189,10 @@ class OptimizedScreenshotService:
                 # Find the transaction instruction block
                 try:
                     instruction_locator = page.locator('text=Legacy Mode').first
-                except:
+                except Exception:
                     try:
                         instruction_locator = page.locator('text=TransferChecked').first
-                    except:
+                    except Exception:
                         instruction_locator = page.locator('text=Transfer').first
 
                 # Find container
@@ -206,7 +206,7 @@ class OptimizedScreenshotService:
                         if box and box['height'] > 100 and box['height'] < 800 and box['width'] > 300:
                             instruction_box = box
                             break
-                    except:
+                    except Exception:
                         continue
 
                 # Save screenshot
@@ -249,7 +249,7 @@ class OptimizedScreenshotService:
             if file_age > max_age_seconds:
                 try:
                     screenshot_file.unlink()
-                except:
+                except Exception:
                     pass
 
     async def health_check(self) -> bool:
