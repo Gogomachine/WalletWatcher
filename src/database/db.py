@@ -2,8 +2,14 @@
 
 import aiosqlite
 from typing import List, Optional, Dict
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
+
+# ==================== НАСТРАИВАЕМЫЕ КОНСТАНТЫ ====================
+# Время до сброса лимита попыток (в часах)
+# Измените на меньшее значение для тестирования, например: 0.5 = 30 минут, 0.0167 = 1 минута
+RESET_HOURS = 24  # 24 часа с последней попытки
+# =================================================================
 
 
 class Database:
@@ -88,6 +94,10 @@ class Database:
                 if 'last_whale_check_date' not in settings_columns:
                     await db.execute("ALTER TABLE user_settings ADD COLUMN last_whale_check_date DATE")
 
+                # Add new TIMESTAMP column for precise time tracking (для сброса через 24 часа)
+                if 'last_whale_check_timestamp' not in settings_columns:
+                    await db.execute("ALTER TABLE user_settings ADD COLUMN last_whale_check_timestamp TIMESTAMP")
+
                 if 'is_premium' not in settings_columns:
                     await db.execute("ALTER TABLE user_settings ADD COLUMN is_premium INTEGER DEFAULT 0")
 
@@ -104,6 +114,10 @@ class Database:
 
                 if 'last_address_report_date' not in settings_columns:
                     await db.execute("ALTER TABLE user_settings ADD COLUMN last_address_report_date DATE")
+
+                # Add new TIMESTAMP column for precise time tracking (для сброса через 24 часа)
+                if 'last_address_report_timestamp' not in settings_columns:
+                    await db.execute("ALTER TABLE user_settings ADD COLUMN last_address_report_timestamp TIMESTAMP")
 
             # Index for faster queries
             await db.execute("""
@@ -562,7 +576,9 @@ class Database:
     # Whale check limits methods
 
     async def get_whale_checks_remaining(self, user_id: int) -> tuple[int, int]:
-        """Get remaining whale checks for today.
+        """Get remaining whale checks.
+
+        Лимит сбрасывается через RESET_HOURS часов после последней попытки.
 
         Args:
             user_id: Telegram user ID
@@ -573,20 +589,9 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
 
-            # First, reset counter if it's a new day (using DB's DATE('now') for consistency)
-            await db.execute(
-                """
-                UPDATE user_settings
-                SET whale_checks_today = 0, last_whale_check_date = DATE('now')
-                WHERE user_id = ?
-                AND (last_whale_check_date IS NULL OR last_whale_check_date != DATE('now'))
-                """,
-                (user_id,)
-            )
-            await db.commit()
-
+            # Получаем текущие данные пользователя
             async with db.execute(
-                "SELECT whale_checks_today, is_premium FROM user_settings WHERE user_id = ?",
+                "SELECT whale_checks_today, is_premium, last_whale_check_timestamp FROM user_settings WHERE user_id = ?",
                 (user_id,)
             ) as cursor:
                 row = await cursor.fetchone()
@@ -594,7 +599,7 @@ class Database:
                 if not row:
                     # Create default settings
                     await db.execute(
-                        "INSERT INTO user_settings (user_id, whale_checks_today, last_whale_check_date) VALUES (?, 0, DATE('now'))",
+                        "INSERT INTO user_settings (user_id, whale_checks_today) VALUES (?, 0)",
                         (user_id,)
                     )
                     await db.commit()
@@ -602,6 +607,30 @@ class Database:
 
                 checks_today = row['whale_checks_today'] or 0
                 is_premium = row['is_premium'] or 0
+                last_check_timestamp = row['last_whale_check_timestamp']
+
+                # Проверяем, прошло ли RESET_HOURS часов с последней попытки
+                if last_check_timestamp and checks_today > 0:
+                    try:
+                        # Парсим timestamp из базы
+                        last_check = datetime.fromisoformat(last_check_timestamp)
+                        reset_threshold = last_check + timedelta(hours=RESET_HOURS)
+
+                        if datetime.now() >= reset_threshold:
+                            # Прошло достаточно времени - сбрасываем счётчик
+                            await db.execute(
+                                """
+                                UPDATE user_settings
+                                SET whale_checks_today = 0, last_whale_check_timestamp = NULL
+                                WHERE user_id = ?
+                                """,
+                                (user_id,)
+                            )
+                            await db.commit()
+                            checks_today = 0
+                    except (ValueError, TypeError):
+                        # Если timestamp некорректный, игнорируем
+                        pass
 
                 # Max checks: 3 for free, 5 for premium
                 max_checks = 5 if is_premium else 3
@@ -609,7 +638,9 @@ class Database:
                 return (checks_today, max_checks)
 
     async def increment_whale_check(self, user_id: int) -> bool:
-        """Increment whale check counter for today.
+        """Increment whale check counter and save timestamp.
+
+        Сохраняет timestamp последней попытки для корректного сброса через RESET_HOURS часов.
 
         Args:
             user_id: Telegram user ID
@@ -617,23 +648,64 @@ class Database:
         Returns:
             True if incremented successfully
         """
+        current_timestamp = datetime.now().isoformat()
+
         async with aiosqlite.connect(self.db_path) as db:
-            # Use UPSERT to ensure user exists and increment counter in one operation
-            # COALESCE handles NULL values from old migrations
-            # CASE handles day change - reset counter to 1 if date changed
-            await db.execute(
-                """
-                INSERT INTO user_settings (user_id, whale_checks_today, last_whale_check_date)
-                VALUES (?, 1, DATE('now'))
-                ON CONFLICT(user_id) DO UPDATE
-                SET whale_checks_today = CASE
-                        WHEN last_whale_check_date IS NULL OR last_whale_check_date != DATE('now') THEN 1
-                        ELSE COALESCE(whale_checks_today, 0) + 1
-                    END,
-                    last_whale_check_date = DATE('now')
-                """,
+            db.row_factory = aiosqlite.Row
+
+            # Проверяем, нужно ли сбросить счётчик
+            async with db.execute(
+                "SELECT whale_checks_today, last_whale_check_timestamp FROM user_settings WHERE user_id = ?",
                 (user_id,)
-            )
+            ) as cursor:
+                row = await cursor.fetchone()
+
+            if row:
+                checks_today = row['whale_checks_today'] or 0
+                last_check_timestamp = row['last_whale_check_timestamp']
+
+                # Проверяем, прошло ли RESET_HOURS часов
+                should_reset = False
+                if last_check_timestamp and checks_today > 0:
+                    try:
+                        last_check = datetime.fromisoformat(last_check_timestamp)
+                        reset_threshold = last_check + timedelta(hours=RESET_HOURS)
+                        if datetime.now() >= reset_threshold:
+                            should_reset = True
+                    except (ValueError, TypeError):
+                        should_reset = True
+
+                if should_reset:
+                    # Сбрасываем и ставим 1
+                    await db.execute(
+                        """
+                        UPDATE user_settings
+                        SET whale_checks_today = 1, last_whale_check_timestamp = ?
+                        WHERE user_id = ?
+                        """,
+                        (current_timestamp, user_id)
+                    )
+                else:
+                    # Просто инкрементируем
+                    await db.execute(
+                        """
+                        UPDATE user_settings
+                        SET whale_checks_today = COALESCE(whale_checks_today, 0) + 1,
+                            last_whale_check_timestamp = ?
+                        WHERE user_id = ?
+                        """,
+                        (current_timestamp, user_id)
+                    )
+            else:
+                # Создаём нового пользователя
+                await db.execute(
+                    """
+                    INSERT INTO user_settings (user_id, whale_checks_today, last_whale_check_timestamp)
+                    VALUES (?, 1, ?)
+                    """,
+                    (user_id, current_timestamp)
+                )
+
             await db.commit()
             return True
 
@@ -650,8 +722,8 @@ class Database:
             # Ensure user settings exist
             await db.execute(
                 """
-                INSERT OR IGNORE INTO user_settings (user_id, whale_checks_today, last_whale_check_date)
-                VALUES (?, 0, DATE('now'))
+                INSERT OR IGNORE INTO user_settings (user_id, whale_checks_today)
+                VALUES (?, 0)
                 """,
                 (user_id,)
             )
@@ -693,7 +765,9 @@ class Database:
     # ==================== FREE SUBSCRIPTION LIMITS ====================
 
     async def get_address_reports_remaining(self, user_id: int) -> tuple[int, int]:
-        """Get remaining address reports for today.
+        """Get remaining address reports.
+
+        Лимит сбрасывается через RESET_HOURS часов после последнего отчёта.
 
         Returns:
             Tuple of (reports_used_today, max_reports)
@@ -701,26 +775,15 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
 
-            await db.execute(
-                """
-                UPDATE user_settings
-                SET address_reports_today = 0, last_address_report_date = DATE('now')
-                WHERE user_id = ?
-                AND (last_address_report_date IS NULL OR last_address_report_date != DATE('now'))
-                """,
-                (user_id,)
-            )
-            await db.commit()
-
             async with db.execute(
-                "SELECT address_reports_today, is_premium FROM user_settings WHERE user_id = ?",
+                "SELECT address_reports_today, is_premium, last_address_report_timestamp FROM user_settings WHERE user_id = ?",
                 (user_id,)
             ) as cursor:
                 row = await cursor.fetchone()
 
                 if not row:
                     await db.execute(
-                        "INSERT INTO user_settings (user_id, address_reports_today, last_address_report_date) VALUES (?, 0, DATE('now'))",
+                        "INSERT INTO user_settings (user_id, address_reports_today) VALUES (?, 0)",
                         (user_id,)
                     )
                     await db.commit()
@@ -728,26 +791,89 @@ class Database:
 
                 reports_today = row['address_reports_today'] or 0
                 is_premium = row['is_premium'] or 0
+                last_report_timestamp = row['last_address_report_timestamp']
+
+                # Проверяем, прошло ли RESET_HOURS часов с последнего отчёта
+                if last_report_timestamp and reports_today > 0:
+                    try:
+                        last_report = datetime.fromisoformat(last_report_timestamp)
+                        reset_threshold = last_report + timedelta(hours=RESET_HOURS)
+
+                        if datetime.now() >= reset_threshold:
+                            # Прошло достаточно времени - сбрасываем счётчик
+                            await db.execute(
+                                """
+                                UPDATE user_settings
+                                SET address_reports_today = 0, last_address_report_timestamp = NULL
+                                WHERE user_id = ?
+                                """,
+                                (user_id,)
+                            )
+                            await db.commit()
+                            reports_today = 0
+                    except (ValueError, TypeError):
+                        pass
+
                 max_reports = 999999 if is_premium else 10
 
                 return (reports_today, max_reports)
 
     async def increment_address_report(self, user_id: int) -> bool:
-        """Increment address report counter for today."""
+        """Increment address report counter and save timestamp."""
+        current_timestamp = datetime.now().isoformat()
+
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                """
-                INSERT INTO user_settings (user_id, address_reports_today, last_address_report_date)
-                VALUES (?, 1, DATE('now'))
-                ON CONFLICT(user_id) DO UPDATE
-                SET address_reports_today = CASE
-                        WHEN last_address_report_date IS NULL OR last_address_report_date != DATE('now') THEN 1
-                        ELSE COALESCE(address_reports_today, 0) + 1
-                    END,
-                    last_address_report_date = DATE('now')
-                """,
+            db.row_factory = aiosqlite.Row
+
+            async with db.execute(
+                "SELECT address_reports_today, last_address_report_timestamp FROM user_settings WHERE user_id = ?",
                 (user_id,)
-            )
+            ) as cursor:
+                row = await cursor.fetchone()
+
+            if row:
+                reports_today = row['address_reports_today'] or 0
+                last_report_timestamp = row['last_address_report_timestamp']
+
+                # Проверяем, прошло ли RESET_HOURS часов
+                should_reset = False
+                if last_report_timestamp and reports_today > 0:
+                    try:
+                        last_report = datetime.fromisoformat(last_report_timestamp)
+                        reset_threshold = last_report + timedelta(hours=RESET_HOURS)
+                        if datetime.now() >= reset_threshold:
+                            should_reset = True
+                    except (ValueError, TypeError):
+                        should_reset = True
+
+                if should_reset:
+                    await db.execute(
+                        """
+                        UPDATE user_settings
+                        SET address_reports_today = 1, last_address_report_timestamp = ?
+                        WHERE user_id = ?
+                        """,
+                        (current_timestamp, user_id)
+                    )
+                else:
+                    await db.execute(
+                        """
+                        UPDATE user_settings
+                        SET address_reports_today = COALESCE(address_reports_today, 0) + 1,
+                            last_address_report_timestamp = ?
+                        WHERE user_id = ?
+                        """,
+                        (current_timestamp, user_id)
+                    )
+            else:
+                await db.execute(
+                    """
+                    INSERT INTO user_settings (user_id, address_reports_today, last_address_report_timestamp)
+                    VALUES (?, 1, ?)
+                    """,
+                    (user_id, current_timestamp)
+                )
+
             await db.commit()
             return True
 
