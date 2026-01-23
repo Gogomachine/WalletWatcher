@@ -1,6 +1,7 @@
 """Bot command handlers."""
 
 import random
+from datetime import datetime
 from pathlib import Path
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
@@ -61,6 +62,27 @@ PEEK_PHRASES = [
 def get_random_peek_phrase() -> str:
     """Get random peek phrase for screenshot process."""
     return random.choice(PEEK_PHRASES)
+
+
+def format_added_at(added_at) -> str:
+    """Format added_at timestamp for display.
+
+    Args:
+        added_at: datetime object or string from database
+
+    Returns:
+        Formatted string like "Добавлен в избранное 22.03.2026 18:03"
+    """
+    if added_at is None:
+        return ""
+
+    if isinstance(added_at, str):
+        try:
+            added_at = datetime.fromisoformat(added_at)
+        except ValueError:
+            return ""
+
+    return f"📅 Добавлен в избранное {added_at.strftime('%d.%m.%Y %H:%M')}"
 
 
 async def _perform_whale_check(message: Message, user_id: int, show_remaining: bool = True) -> None:
@@ -938,10 +960,12 @@ async def show_address_actions(callback: CallbackQuery):
 
     nickname = addr_info.get('nickname', '') if addr_info else ''
     display_text = nickname if nickname else f"{address[:8]}...{address[-6:]}"
+    added_at_str = format_added_at(addr_info.get('added_at')) if addr_info else ''
 
     await callback.message.edit_text(
         f"🔍 <b>Адрес:</b> {display_text}\n"
-        f"<code>{address}</code>\n\n"
+        f"<code>{address}</code>\n"
+        f"{added_at_str}\n\n"
         "Выберите действие:",
         reply_markup=get_address_actions_keyboard(address, notifications_enabled),
         parse_mode="HTML"
@@ -1057,10 +1081,12 @@ async def enable_address_notifications(callback: CallbackQuery):
     addr_info = await database.get_address_info(user_id, address)
     nickname = addr_info.get('nickname', '') if addr_info else ''
     display_text = nickname if nickname else f"{address[:8]}...{address[-6:]}"
+    added_at_str = format_added_at(addr_info.get('added_at')) if addr_info else ''
 
     await callback.message.edit_text(
         f"🔍 <b>Адрес:</b> {display_text}\n"
-        f"<code>{address}</code>\n\n"
+        f"<code>{address}</code>\n"
+        f"{added_at_str}\n\n"
         "Выберите действие:",
         reply_markup=get_address_actions_keyboard(address, True),
         parse_mode="HTML"
@@ -1080,10 +1106,12 @@ async def disable_address_notifications(callback: CallbackQuery):
     addr_info = await database.get_address_info(user_id, address)
     nickname = addr_info.get('nickname', '') if addr_info else ''
     display_text = nickname if nickname else f"{address[:8]}...{address[-6:]}"
+    added_at_str = format_added_at(addr_info.get('added_at')) if addr_info else ''
 
     await callback.message.edit_text(
         f"🔍 <b>Адрес:</b> {display_text}\n"
-        f"<code>{address}</code>\n\n"
+        f"<code>{address}</code>\n"
+        f"{added_at_str}\n\n"
         "Выберите действие:",
         reply_markup=get_address_actions_keyboard(address, False),
         parse_mode="HTML"
