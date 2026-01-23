@@ -98,6 +98,13 @@ class Database:
                     WHERE whale_checks_today IS NULL
                 """)
 
+                # Add address report limits columns if missing
+                if 'address_reports_today' not in settings_columns:
+                    await db.execute("ALTER TABLE user_settings ADD COLUMN address_reports_today INTEGER DEFAULT 0")
+
+                if 'last_address_report_date' not in settings_columns:
+                    await db.execute("ALTER TABLE user_settings ADD COLUMN last_address_report_date DATE")
+
             # Index for faster queries
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_user_addresses
