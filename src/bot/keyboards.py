@@ -247,18 +247,12 @@ def get_select_addresses_keyboard(addresses: list) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def get_persistent_keyboard(bot_active: bool = True) -> ReplyKeyboardMarkup:
+def get_persistent_keyboard() -> ReplyKeyboardMarkup:
     """Get persistent reply keyboard shown at the bottom of the chat.
-
-    Args:
-        bot_active: Whether bot is active for the user
 
     Returns:
         Reply keyboard with action buttons
     """
-    # Control button changes based on bot status
-    control_button = KeyboardButton(text="🛑 Стоп") if bot_active else KeyboardButton(text="🚀 Поехали")
-
     buttons = [
         [
             KeyboardButton(text="👤 Профиль"),
@@ -270,7 +264,7 @@ def get_persistent_keyboard(bot_active: bool = True) -> ReplyKeyboardMarkup:
         ],
         [
             KeyboardButton(text="⚙️ Настройки"),
-            control_button
+            KeyboardButton(text="💎 Подписки")
         ]
     ]
 

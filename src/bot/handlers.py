@@ -244,16 +244,12 @@ def is_blockchain_address(text: str) -> bool:
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     """Handle /start command."""
-    # Get user settings for bot_active status
-    settings = await database.get_user_settings(message.from_user.id)
-    bot_active = settings.get('bot_active', 1)
-
     # Если в группе, отвечаем кратко
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await message.reply(
             "👋 Привет! Я бот для отслеживания всяких разных адресов.\n\n"
             "Отправьте адрес или используйте /menu для просмотра команд.",
-            reply_markup=get_persistent_keyboard(bot_active=bool(bot_active))
+            reply_markup=get_persistent_keyboard()
         )
     else:
         await message.answer(
@@ -263,10 +259,10 @@ async def cmd_start(message: Message):
             "• Показать информацию о любом адресе со скриншотиками прикольно, удобно можно сразу в эксплорер\n"
             "• Отслеживать адреса в реальном времени, создавать группы адресов, баланс группы можно тоже посмотреть\n"
             "• Уведомлять о новых транзакциях тоже со скриншотиками\n"
-            "• Можно нажать СТОП чтоб никто вас не доставал\n"
-            "• Пикантный режим \"Подсмотреть\", с конкурсами и тамадой\n\n"
+            "• Пикантный режим \"Подсмотреть\", с конкурсами и тамадой\n"
+            "• 💎 Premium подписка с бонусами и доступом в VIP сообщество\n\n"
             "Используйте меню ниже для навигации:",
-            reply_markup=get_persistent_keyboard(bot_active=bool(bot_active))
+            reply_markup=get_persistent_keyboard()
         )
         # Send inline menu after persistent keyboard
         await message.answer(
@@ -308,18 +304,14 @@ async def cmd_help(message: Message):
 @router.message(Command("menu"))
 async def cmd_menu(message: Message):
     """Handle /menu command."""
-    # Update keyboard based on bot_active status
-    settings = await database.get_user_settings(message.from_user.id)
-    bot_active = settings.get('bot_active', 1)
-
     await message.reply(
         "📱 Главное меню:",
         reply_markup=get_main_menu()
     )
-    # Update persistent keyboard to show current status
+    # Update persistent keyboard
     await message.answer(
         "Используйте кнопки ниже:",
-        reply_markup=get_persistent_keyboard(bot_active=bool(bot_active))
+        reply_markup=get_persistent_keyboard()
     )
 
 
@@ -404,48 +396,54 @@ async def text_settings_button(message: Message):
     await show_settings(message)
 
 
-@router.message(F.text == "🛑 Стоп")
-async def text_stop_button(message: Message):
-    """Handle 'Stop' button press - pauses bot for user."""
+@router.message(F.text == "💎 Подписки")
+async def text_subscription_button(message: Message):
+    """Handle 'Subscription' button press - shows subscription info."""
     user_id = message.from_user.id
+    settings = await database.get_user_settings(user_id)
+    is_premium = settings.get('is_premium', 0)
 
-    # Update bot status to inactive
-    await database.update_bot_active(user_id, False)
+    if is_premium:
+        msg = (
+            "💎 <b>Ваша подписка: PREMIUM</b>\n\n"
+            "✅ Безлимитное отслеживание адресов\n"
+            "✅ Безлимитное создание групп\n"
+            "✅ 5 попыток 'Подсмотреть' в день\n"
+            "   <i>(дополнительные: 1000, 2000, 3000 ⭐ и т.д.)</i>\n"
+            "✅ 20 АМЛ отчетов в месяц <i>(скоро)</i>\n"
+            "✅ Доступ в Discord и VIP Telegram\n"
+            "✅ Бонусы при эйрдропе 🎁\n\n"
+            "<i>Спасибо за поддержку!</i> 🙏"
+        )
+        buttons = [[InlineKeyboardButton(text="🔙 В меню", callback_data="cancel")]]
+    else:
+        limits = await database.get_free_limits(user_id)
+        msg = (
+            "📋 <b>Ваша подписка: FREE</b>\n\n"
+            f"👀 Подсмотреть: {limits['whale']['remaining']}/{limits['whale']['max']} сегодня\n"
+            f"📊 Запросы по адресам: {limits['reports']['remaining']}/{limits['reports']['max']} сегодня\n"
+            f"⭐ Избранное: {limits['favorites']['count']}/{limits['favorites']['max']} адресов\n"
+            f"📁 Группы: {limits['groups']['count']}/{limits['groups']['max']}\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "💎 <b>PREMIUM подписка</b>\n\n"
+            "✨ Безлимитное отслеживание адресов\n"
+            "✨ Безлимитное создание групп\n"
+            "✨ 5 попыток 'Подсмотреть' в день\n"
+            "   <i>(дополнительные: 1000, 2000, 3000 ⭐ и т.д.)</i>\n"
+            "✨ 20 АМЛ отчетов в месяц <i>(скоро)</i>\n"
+            "✨ Доступ в Discord и VIP Telegram\n"
+            "✨ Бонусы при эйрдропе 🎁\n\n"
+            "💰 <b>Цена: 1 ⭐</b> (тестовый период)"
+        )
+        buttons = [
+            [InlineKeyboardButton(text="💎 Купить Premium (1 ⭐)", callback_data="buy_premium")],
+            [InlineKeyboardButton(text="🔙 В меню", callback_data="cancel")]
+        ]
 
-    # Send confirmation with updated keyboard
     await message.answer(
-        "🛑 <b>Бот остановлен</b>\n\n"
-        "Все процессы приостановлены:\n"
-        "• Мониторинг транзакций отключён\n"
-        "• Уведомления не отправляются\n\n"
-        "Нажмите <b>🚀 Поехали</b>, чтобы возобновить работу.",
+        msg,
         parse_mode="HTML",
-        reply_markup=get_persistent_keyboard(bot_active=False)
-    )
-
-
-@router.message(F.text == "🚀 Поехали")
-async def text_start_button(message: Message):
-    """Handle 'Start' button press - resumes bot for user."""
-    user_id = message.from_user.id
-
-    # Reset monitoring state - start from scratch
-    await database.reset_user_monitoring(user_id)
-
-    # Update bot status to active
-    await database.update_bot_active(user_id, True)
-
-    # Send confirmation with updated keyboard
-    await message.answer(
-        "🚀 <b>Бот запущен с чистого листа!</b>\n\n"
-        "Все системы активированы:\n"
-        "• ✅ Мониторинг транзакций включён\n"
-        "• ✅ Уведомления активны\n"
-        "• ✅ Все функции доступны\n"
-        "• 🔄 Отслеживание начинается с этого момента\n\n"
-        "Бот работает в штатном режиме!",
-        parse_mode="HTML",
-        reply_markup=get_persistent_keyboard(bot_active=True)
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
 
 
@@ -1542,7 +1540,10 @@ async def menu_subscription_callback(callback: CallbackQuery):
             "✅ Безлимитное отслеживание адресов\n"
             "✅ Безлимитное создание групп\n"
             "✅ 5 попыток 'Подсмотреть' в день\n"
-            "✅ Безлимитные запросы по адресам\n\n"
+            "   <i>(дополнительные: 1000, 2000, 3000 ⭐ и т.д.)</i>\n"
+            "✅ 20 АМЛ отчетов в месяц <i>(скоро)</i>\n"
+            "✅ Доступ в Discord и VIP Telegram\n"
+            "✅ Бонусы при эйрдропе 🎁\n\n"
             "<i>Спасибо за поддержку!</i> 🙏"
         )
         buttons = [[InlineKeyboardButton(text="🔙 Назад", callback_data="cancel")]]
@@ -1559,7 +1560,10 @@ async def menu_subscription_callback(callback: CallbackQuery):
             "✨ Безлимитное отслеживание адресов\n"
             "✨ Безлимитное создание групп\n"
             "✨ 5 попыток 'Подсмотреть' в день\n"
-            "✨ Безлимитные запросы по адресам\n\n"
+            "   <i>(дополнительные: 1000, 2000, 3000 ⭐ и т.д.)</i>\n"
+            "✨ 20 АМЛ отчетов в месяц <i>(скоро)</i>\n"
+            "✨ Доступ в Discord и VIP Telegram\n"
+            "✨ Бонусы при эйрдропе 🎁\n\n"
             "💰 <b>Цена: 1 ⭐</b> (тестовый период)"
         )
         buttons = [
@@ -1596,7 +1600,13 @@ async def buy_premium_callback(callback: CallbackQuery):
 
     await callback.message.answer_invoice(
         title="💎 Premium подписка",
-        description="Безлимитное отслеживание адресов и групп\n5 попыток 'Подсмотреть' в день\nБезлимитные запросы по адресам",
+        description=(
+            "✨ Безлимитное отслеживание адресов и групп\n"
+            "✨ 5 попыток 'Подсмотреть' в день\n"
+            "✨ 20 АМЛ отчетов в месяц (скоро)\n"
+            "✨ Discord + VIP Telegram\n"
+            "✨ Бонусы при эйрдропе"
+        ),
         payload=f"premium:{user_id}",
         provider_token="",  # Empty for Telegram Stars
         currency="XTR",
@@ -1641,7 +1651,10 @@ async def process_successful_payment(message: Message):
                 "✅ Безлимитное отслеживание адресов\n"
                 "✅ Безлимитное создание групп\n"
                 "✅ 5 попыток 'Подсмотреть' в день\n"
-                "✅ Безлимитные запросы по адресам\n\n"
+                "   <i>(дополнительные: 1000, 2000, 3000 ⭐ и т.д.)</i>\n"
+                "✅ 20 АМЛ отчетов в месяц <i>(скоро)</i>\n"
+                "✅ Доступ в Discord и VIP Telegram\n"
+                "✅ Бонусы при эйрдропе 🎁\n\n"
                 "<i>Спасибо за поддержку! 💎</i>",
                 parse_mode="HTML",
                 reply_markup=get_main_menu()
