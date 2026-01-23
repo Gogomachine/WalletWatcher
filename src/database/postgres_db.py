@@ -2,8 +2,14 @@
 
 import asyncpg
 from typing import List, Optional, Dict
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
+
+# ==================== НАСТРАИВАЕМЫЕ КОНСТАНТЫ ====================
+# Время до сброса лимита попыток (в часах)
+# Измените на меньшее значение для тестирования, например: 0.5 = 30 минут, 0.0167 = 1 минута
+RESET_HOURS = 24  # 24 часа с последней попытки
+# =================================================================
 
 
 class PostgresDatabase:
@@ -113,6 +119,16 @@ class PostgresDatabase:
                 await conn.execute("""
                     ALTER TABLE user_settings
                     ADD COLUMN IF NOT EXISTS last_address_report_date DATE
+                """)
+
+                # Add new TIMESTAMP columns for precise time tracking (для сброса через 24 часа)
+                await conn.execute("""
+                    ALTER TABLE user_settings
+                    ADD COLUMN IF NOT EXISTS last_whale_check_timestamp TIMESTAMP
+                """)
+                await conn.execute("""
+                    ALTER TABLE user_settings
+                    ADD COLUMN IF NOT EXISTS last_address_report_timestamp TIMESTAMP
                 """)
             except Exception as e:
                 # Columns might already exist
@@ -556,7 +572,9 @@ class PostgresDatabase:
     # Whale check limits methods
 
     async def get_whale_checks_remaining(self, user_id: int) -> tuple[int, int]:
-        """Get remaining whale checks for today.
+        """Get remaining whale checks.
+
+        Лимит сбрасывается через RESET_HOURS часов после последней попытки.
 
         Args:
             user_id: Telegram user ID
@@ -565,32 +583,41 @@ class PostgresDatabase:
             Tuple of (checks_used_today, max_checks)
         """
         async with self.pool.acquire() as conn:
-            # First, reset counter if it's a new day (using DB's CURRENT_DATE for consistency)
-            await conn.execute(
-                """
-                UPDATE user_settings
-                SET whale_checks_today = 0, last_whale_check_date = CURRENT_DATE
-                WHERE user_id = $1
-                AND (last_whale_check_date IS NULL OR last_whale_check_date != CURRENT_DATE)
-                """,
-                user_id
-            )
-
             row = await conn.fetchrow(
-                "SELECT whale_checks_today, is_premium FROM user_settings WHERE user_id = $1",
+                "SELECT whale_checks_today, is_premium, last_whale_check_timestamp FROM user_settings WHERE user_id = $1",
                 user_id
             )
 
             if not row:
                 # Create default settings
                 await conn.execute(
-                    "INSERT INTO user_settings (user_id, whale_checks_today, last_whale_check_date) VALUES ($1, 0, CURRENT_DATE)",
+                    "INSERT INTO user_settings (user_id, whale_checks_today) VALUES ($1, 0)",
                     user_id
                 )
                 return (0, 3)
 
             checks_today = row['whale_checks_today'] or 0
             is_premium = row['is_premium'] or False
+            last_check_timestamp = row['last_whale_check_timestamp']
+
+            # Проверяем, прошло ли RESET_HOURS часов с последней попытки
+            if last_check_timestamp and checks_today > 0:
+                try:
+                    reset_threshold = last_check_timestamp + timedelta(hours=RESET_HOURS)
+
+                    if datetime.now() >= reset_threshold:
+                        # Прошло достаточно времени - сбрасываем счётчик
+                        await conn.execute(
+                            """
+                            UPDATE user_settings
+                            SET whale_checks_today = 0, last_whale_check_timestamp = NULL
+                            WHERE user_id = $1
+                            """,
+                            user_id
+                        )
+                        checks_today = 0
+                except (ValueError, TypeError):
+                    pass
 
             # Max checks: 3 for free, 5 for premium
             max_checks = 5 if is_premium else 3
@@ -598,7 +625,9 @@ class PostgresDatabase:
             return (checks_today, max_checks)
 
     async def increment_whale_check(self, user_id: int) -> bool:
-        """Increment whale check counter for today.
+        """Increment whale check counter and save timestamp.
+
+        Сохраняет timestamp последней попытки для корректного сброса через RESET_HOURS часов.
 
         Args:
             user_id: Telegram user ID
@@ -606,23 +635,59 @@ class PostgresDatabase:
         Returns:
             True if incremented successfully
         """
+        current_timestamp = datetime.now()
+
         async with self.pool.acquire() as conn:
-            # Use UPSERT to ensure user exists and increment counter in one atomic operation
-            # COALESCE handles NULL values from old migrations
-            # CASE handles day change - reset counter to 1 if date changed
-            await conn.execute(
-                """
-                INSERT INTO user_settings (user_id, whale_checks_today, last_whale_check_date)
-                VALUES ($1, 1, CURRENT_DATE)
-                ON CONFLICT (user_id) DO UPDATE
-                SET whale_checks_today = CASE
-                        WHEN user_settings.last_whale_check_date IS NULL OR user_settings.last_whale_check_date != CURRENT_DATE THEN 1
-                        ELSE COALESCE(user_settings.whale_checks_today, 0) + 1
-                    END,
-                    last_whale_check_date = CURRENT_DATE
-                """,
+            row = await conn.fetchrow(
+                "SELECT whale_checks_today, last_whale_check_timestamp FROM user_settings WHERE user_id = $1",
                 user_id
             )
+
+            if row:
+                checks_today = row['whale_checks_today'] or 0
+                last_check_timestamp = row['last_whale_check_timestamp']
+
+                # Проверяем, прошло ли RESET_HOURS часов
+                should_reset = False
+                if last_check_timestamp and checks_today > 0:
+                    try:
+                        reset_threshold = last_check_timestamp + timedelta(hours=RESET_HOURS)
+                        if datetime.now() >= reset_threshold:
+                            should_reset = True
+                    except (ValueError, TypeError):
+                        should_reset = True
+
+                if should_reset:
+                    # Сбрасываем и ставим 1
+                    await conn.execute(
+                        """
+                        UPDATE user_settings
+                        SET whale_checks_today = 1, last_whale_check_timestamp = $1
+                        WHERE user_id = $2
+                        """,
+                        current_timestamp, user_id
+                    )
+                else:
+                    # Просто инкрементируем
+                    await conn.execute(
+                        """
+                        UPDATE user_settings
+                        SET whale_checks_today = COALESCE(whale_checks_today, 0) + 1,
+                            last_whale_check_timestamp = $1
+                        WHERE user_id = $2
+                        """,
+                        current_timestamp, user_id
+                    )
+            else:
+                # Создаём нового пользователя
+                await conn.execute(
+                    """
+                    INSERT INTO user_settings (user_id, whale_checks_today, last_whale_check_timestamp)
+                    VALUES ($1, 1, $2)
+                    """,
+                    user_id, current_timestamp
+                )
+
             return True
 
     async def decrement_whale_check(self, user_id: int) -> bool:
@@ -638,8 +703,8 @@ class PostgresDatabase:
             # Ensure user settings exist
             await conn.execute(
                 """
-                INSERT INTO user_settings (user_id, whale_checks_today, last_whale_check_date)
-                VALUES ($1, 0, CURRENT_DATE)
+                INSERT INTO user_settings (user_id, whale_checks_today)
+                VALUES ($1, 0)
                 ON CONFLICT (user_id) DO NOTHING
                 """,
                 user_id
@@ -680,56 +745,105 @@ class PostgresDatabase:
     # ==================== FREE SUBSCRIPTION LIMITS ====================
 
     async def get_address_reports_remaining(self, user_id: int) -> tuple[int, int]:
-        """Get remaining address reports for today.
+        """Get remaining address reports.
+
+        Лимит сбрасывается через RESET_HOURS часов после последнего отчёта.
 
         Returns:
             Tuple of (reports_used_today, max_reports)
         """
         async with self.pool.acquire() as conn:
-            await conn.execute(
-                """
-                UPDATE user_settings
-                SET address_reports_today = 0, last_address_report_date = CURRENT_DATE
-                WHERE user_id = $1
-                AND (last_address_report_date IS NULL OR last_address_report_date != CURRENT_DATE)
-                """,
-                user_id
-            )
-
             row = await conn.fetchrow(
-                "SELECT address_reports_today, is_premium FROM user_settings WHERE user_id = $1",
+                "SELECT address_reports_today, is_premium, last_address_report_timestamp FROM user_settings WHERE user_id = $1",
                 user_id
             )
 
             if not row:
                 await conn.execute(
-                    "INSERT INTO user_settings (user_id, address_reports_today, last_address_report_date) VALUES ($1, 0, CURRENT_DATE)",
+                    "INSERT INTO user_settings (user_id, address_reports_today) VALUES ($1, 0)",
                     user_id
                 )
                 return (0, 10)
 
             reports_today = row['address_reports_today'] or 0
             is_premium = row['is_premium'] or False
+            last_report_timestamp = row['last_address_report_timestamp']
+
+            # Проверяем, прошло ли RESET_HOURS часов с последнего отчёта
+            if last_report_timestamp and reports_today > 0:
+                try:
+                    reset_threshold = last_report_timestamp + timedelta(hours=RESET_HOURS)
+
+                    if datetime.now() >= reset_threshold:
+                        # Прошло достаточно времени - сбрасываем счётчик
+                        await conn.execute(
+                            """
+                            UPDATE user_settings
+                            SET address_reports_today = 0, last_address_report_timestamp = NULL
+                            WHERE user_id = $1
+                            """,
+                            user_id
+                        )
+                        reports_today = 0
+                except (ValueError, TypeError):
+                    pass
+
             max_reports = 999999 if is_premium else 10
 
             return (reports_today, max_reports)
 
     async def increment_address_report(self, user_id: int) -> bool:
-        """Increment address report counter for today."""
+        """Increment address report counter and save timestamp."""
+        current_timestamp = datetime.now()
+
         async with self.pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO user_settings (user_id, address_reports_today, last_address_report_date)
-                VALUES ($1, 1, CURRENT_DATE)
-                ON CONFLICT (user_id) DO UPDATE
-                SET address_reports_today = CASE
-                        WHEN user_settings.last_address_report_date IS NULL OR user_settings.last_address_report_date != CURRENT_DATE THEN 1
-                        ELSE COALESCE(user_settings.address_reports_today, 0) + 1
-                    END,
-                    last_address_report_date = CURRENT_DATE
-                """,
+            row = await conn.fetchrow(
+                "SELECT address_reports_today, last_address_report_timestamp FROM user_settings WHERE user_id = $1",
                 user_id
             )
+
+            if row:
+                reports_today = row['address_reports_today'] or 0
+                last_report_timestamp = row['last_address_report_timestamp']
+
+                # Проверяем, прошло ли RESET_HOURS часов
+                should_reset = False
+                if last_report_timestamp and reports_today > 0:
+                    try:
+                        reset_threshold = last_report_timestamp + timedelta(hours=RESET_HOURS)
+                        if datetime.now() >= reset_threshold:
+                            should_reset = True
+                    except (ValueError, TypeError):
+                        should_reset = True
+
+                if should_reset:
+                    await conn.execute(
+                        """
+                        UPDATE user_settings
+                        SET address_reports_today = 1, last_address_report_timestamp = $1
+                        WHERE user_id = $2
+                        """,
+                        current_timestamp, user_id
+                    )
+                else:
+                    await conn.execute(
+                        """
+                        UPDATE user_settings
+                        SET address_reports_today = COALESCE(address_reports_today, 0) + 1,
+                            last_address_report_timestamp = $1
+                        WHERE user_id = $2
+                        """,
+                        current_timestamp, user_id
+                    )
+            else:
+                await conn.execute(
+                    """
+                    INSERT INTO user_settings (user_id, address_reports_today, last_address_report_timestamp)
+                    VALUES ($1, 1, $2)
+                    """,
+                    user_id, current_timestamp
+                )
+
             return True
 
     async def get_favorites_count(self, user_id: int) -> int:

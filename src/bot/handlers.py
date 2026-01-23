@@ -106,12 +106,12 @@ async def _perform_whale_check(message: Message, user_id: int, show_remaining: b
 
         limit_msg = (
             "⛔ <b>Лимит исчерпан</b>\n\n"
-            f"Вы использовали все {'5' if is_premium else '3'} бесплатные попытки на сегодня.\n"
+            f"Вы использовали все {'5' if is_premium else '3'} бесплатные попытки.\n"
             f"Попыток использовано: {checks_used}\n\n"
             "💡 Вы можете:\n"
             "• Купить дополнительную попытку за Telegram Stars\n"
             "• Оформить премиум подписку (5 попыток/день)\n"
-            "• Вернуться завтра (лимит обнуляется в 00:00)"
+            "• Подождать 24 часа с момента последней попытки"
         )
 
         await message.answer(
@@ -343,8 +343,8 @@ async def text_profile_button(message: Message):
         f"📋 Отслеживаемых адресов: {count}\n"
         f"📁 Групп: {len(groups)}\n\n"
         f"💎 <b>Подписка:</b> {subscription_status}\n"
-        f"👀 <b>Подсмотреть:</b> {remaining_checks}/{max_checks} попыток осталось сегодня\n\n"
-        f"<i>Лимит обнуляется каждый день в 00:00</i>",
+        f"👀 <b>Подсмотреть:</b> {remaining_checks}/{max_checks} попыток осталось\n\n"
+        f"<i>Лимит обновляется через 24 часа после последней попытки</i>",
         parse_mode="HTML"
     )
 
@@ -656,8 +656,8 @@ async def menu_profile_callback(callback: CallbackQuery):
         f"📋 Отслеживаемых адресов: {count}\n"
         f"📁 Групп: {len(groups)}\n\n"
         f"💎 <b>Подписка:</b> {subscription_status}\n"
-        f"👀 <b>Подсмотреть:</b> {remaining_checks}/{max_checks} попыток осталось сегодня\n\n"
-        f"<i>Лимит обнуляется каждый день в 00:00</i>",
+        f"👀 <b>Подсмотреть:</b> {remaining_checks}/{max_checks} попыток осталось\n\n"
+        f"<i>Лимит обновляется через 24 часа после последней попытки</i>",
         parse_mode="HTML",
         reply_markup=get_main_menu()
     )
@@ -889,9 +889,9 @@ async def check_address(message: Message, address: str):
         if not is_premium:
             await message.reply(
                 "⛔ <b>Лимит исчерпан</b>\n\n"
-                "Вы использовали все 10 бесплатных запросов на сегодня.\n\n"
+                "Вы использовали все 10 бесплатных запросов.\n\n"
                 "💡 Оформите премиум подписку для безлимитных запросов\n"
-                "или вернитесь завтра (лимит обнуляется в 00:00)",
+                "или подождите 24 часа с момента последнего запроса",
                 parse_mode="HTML"
             )
             return
