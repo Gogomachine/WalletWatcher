@@ -689,3 +689,102 @@ class Database:
             )
             await db.commit()
             return True
+
+    # ==================== FREE SUBSCRIPTION LIMITS ====================
+
+    async def get_address_reports_remaining(self, user_id: int) -> tuple[int, int]:
+        """Get remaining address reports for today.
+
+        Returns:
+            Tuple of (reports_used_today, max_reports)
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            await db.execute(
+                """
+                UPDATE user_settings
+                SET address_reports_today = 0, last_address_report_date = DATE('now')
+                WHERE user_id = ?
+                AND (last_address_report_date IS NULL OR last_address_report_date != DATE('now'))
+                """,
+                (user_id,)
+            )
+            await db.commit()
+
+            async with db.execute(
+                "SELECT address_reports_today, is_premium FROM user_settings WHERE user_id = ?",
+                (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+
+                if not row:
+                    await db.execute(
+                        "INSERT INTO user_settings (user_id, address_reports_today, last_address_report_date) VALUES (?, 0, DATE('now'))",
+                        (user_id,)
+                    )
+                    await db.commit()
+                    return (0, 10)
+
+                reports_today = row['address_reports_today'] or 0
+                is_premium = row['is_premium'] or 0
+                max_reports = 999999 if is_premium else 10
+
+                return (reports_today, max_reports)
+
+    async def increment_address_report(self, user_id: int) -> bool:
+        """Increment address report counter for today."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO user_settings (user_id, address_reports_today, last_address_report_date)
+                VALUES (?, 1, DATE('now'))
+                ON CONFLICT(user_id) DO UPDATE
+                SET address_reports_today = CASE
+                        WHEN last_address_report_date IS NULL OR last_address_report_date != DATE('now') THEN 1
+                        ELSE COALESCE(address_reports_today, 0) + 1
+                    END,
+                    last_address_report_date = DATE('now')
+                """,
+                (user_id,)
+            )
+            await db.commit()
+            return True
+
+    async def get_favorites_count(self, user_id: int) -> int:
+        """Get count of tracked addresses for user."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM tracked_addresses WHERE user_id = ?",
+                (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else 0
+
+    async def get_groups_count(self, user_id: int) -> int:
+        """Get count of groups for user."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM address_groups WHERE user_id = ?",
+                (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else 0
+
+    async def get_free_limits(self, user_id: int) -> dict:
+        """Get all FREE subscription limits for user."""
+        settings = await self.get_user_settings(user_id)
+        is_premium = settings.get('is_premium', 0)
+
+        reports_used, max_reports = await self.get_address_reports_remaining(user_id)
+        whale_used, max_whale = await self.get_whale_checks_remaining(user_id)
+        favorites_count = await self.get_favorites_count(user_id)
+        groups_count = await self.get_groups_count(user_id)
+
+        return {
+            'is_premium': bool(is_premium),
+            'reports': {'used': reports_used, 'max': max_reports, 'remaining': max_reports - reports_used},
+            'whale': {'used': whale_used, 'max': max_whale, 'remaining': max_whale - whale_used},
+            'favorites': {'count': favorites_count, 'max': 999999 if is_premium else 2},
+            'groups': {'count': groups_count, 'max': 999999 if is_premium else 1},
+        }
