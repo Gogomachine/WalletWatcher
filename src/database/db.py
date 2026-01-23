@@ -609,28 +609,37 @@ class Database:
                 is_premium = row['is_premium'] or 0
                 last_check_timestamp = row['last_whale_check_timestamp']
 
-                # Проверяем, прошло ли RESET_HOURS часов с последней попытки
-                if last_check_timestamp and checks_today > 0:
-                    try:
-                        # Парсим timestamp из базы
-                        last_check = datetime.fromisoformat(last_check_timestamp)
-                        reset_threshold = last_check + timedelta(hours=RESET_HOURS)
+                # Проверяем, нужно ли сбросить счётчик
+                should_reset = False
 
-                        if datetime.now() >= reset_threshold:
-                            # Прошло достаточно времени - сбрасываем счётчик
-                            await db.execute(
-                                """
-                                UPDATE user_settings
-                                SET whale_checks_today = 0, last_whale_check_timestamp = NULL
-                                WHERE user_id = ?
-                                """,
-                                (user_id,)
-                            )
-                            await db.commit()
-                            checks_today = 0
-                    except (ValueError, TypeError):
-                        # Если timestamp некорректный, игнорируем
-                        pass
+                if checks_today > 0:
+                    if last_check_timestamp is None:
+                        # Старые данные без timestamp - сбрасываем счётчик
+                        should_reset = True
+                    else:
+                        try:
+                            # Парсим timestamp из базы
+                            last_check = datetime.fromisoformat(last_check_timestamp)
+                            reset_threshold = last_check + timedelta(hours=RESET_HOURS)
+
+                            if datetime.now() >= reset_threshold:
+                                # Прошло достаточно времени - сбрасываем счётчик
+                                should_reset = True
+                        except (ValueError, TypeError):
+                            # Если timestamp некорректный - сбрасываем
+                            should_reset = True
+
+                if should_reset:
+                    await db.execute(
+                        """
+                        UPDATE user_settings
+                        SET whale_checks_today = 0, last_whale_check_timestamp = NULL
+                        WHERE user_id = ?
+                        """,
+                        (user_id,)
+                    )
+                    await db.commit()
+                    checks_today = 0
 
                 # Max checks: 3 for free, 5 for premium
                 max_checks = 5 if is_premium else 3
@@ -666,14 +675,18 @@ class Database:
 
                 # Проверяем, прошло ли RESET_HOURS часов
                 should_reset = False
-                if last_check_timestamp and checks_today > 0:
-                    try:
-                        last_check = datetime.fromisoformat(last_check_timestamp)
-                        reset_threshold = last_check + timedelta(hours=RESET_HOURS)
-                        if datetime.now() >= reset_threshold:
-                            should_reset = True
-                    except (ValueError, TypeError):
+                if checks_today > 0:
+                    if last_check_timestamp is None:
+                        # Старые данные без timestamp - сбрасываем
                         should_reset = True
+                    else:
+                        try:
+                            last_check = datetime.fromisoformat(last_check_timestamp)
+                            reset_threshold = last_check + timedelta(hours=RESET_HOURS)
+                            if datetime.now() >= reset_threshold:
+                                should_reset = True
+                        except (ValueError, TypeError):
+                            should_reset = True
 
                 if should_reset:
                     # Сбрасываем и ставим 1
@@ -793,26 +806,34 @@ class Database:
                 is_premium = row['is_premium'] or 0
                 last_report_timestamp = row['last_address_report_timestamp']
 
-                # Проверяем, прошло ли RESET_HOURS часов с последнего отчёта
-                if last_report_timestamp and reports_today > 0:
-                    try:
-                        last_report = datetime.fromisoformat(last_report_timestamp)
-                        reset_threshold = last_report + timedelta(hours=RESET_HOURS)
+                # Проверяем, нужно ли сбросить счётчик
+                should_reset = False
 
-                        if datetime.now() >= reset_threshold:
-                            # Прошло достаточно времени - сбрасываем счётчик
-                            await db.execute(
-                                """
-                                UPDATE user_settings
-                                SET address_reports_today = 0, last_address_report_timestamp = NULL
-                                WHERE user_id = ?
-                                """,
-                                (user_id,)
-                            )
-                            await db.commit()
-                            reports_today = 0
-                    except (ValueError, TypeError):
-                        pass
+                if reports_today > 0:
+                    if last_report_timestamp is None:
+                        # Старые данные без timestamp - сбрасываем
+                        should_reset = True
+                    else:
+                        try:
+                            last_report = datetime.fromisoformat(last_report_timestamp)
+                            reset_threshold = last_report + timedelta(hours=RESET_HOURS)
+
+                            if datetime.now() >= reset_threshold:
+                                should_reset = True
+                        except (ValueError, TypeError):
+                            should_reset = True
+
+                if should_reset:
+                    await db.execute(
+                        """
+                        UPDATE user_settings
+                        SET address_reports_today = 0, last_address_report_timestamp = NULL
+                        WHERE user_id = ?
+                        """,
+                        (user_id,)
+                    )
+                    await db.commit()
+                    reports_today = 0
 
                 max_reports = 999999 if is_premium else 10
 
@@ -837,14 +858,18 @@ class Database:
 
                 # Проверяем, прошло ли RESET_HOURS часов
                 should_reset = False
-                if last_report_timestamp and reports_today > 0:
-                    try:
-                        last_report = datetime.fromisoformat(last_report_timestamp)
-                        reset_threshold = last_report + timedelta(hours=RESET_HOURS)
-                        if datetime.now() >= reset_threshold:
-                            should_reset = True
-                    except (ValueError, TypeError):
+                if reports_today > 0:
+                    if last_report_timestamp is None:
+                        # Старые данные без timestamp - сбрасываем
                         should_reset = True
+                    else:
+                        try:
+                            last_report = datetime.fromisoformat(last_report_timestamp)
+                            reset_threshold = last_report + timedelta(hours=RESET_HOURS)
+                            if datetime.now() >= reset_threshold:
+                                should_reset = True
+                        except (ValueError, TypeError):
+                            should_reset = True
 
                 if should_reset:
                     await db.execute(

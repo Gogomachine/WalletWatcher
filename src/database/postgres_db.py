@@ -600,24 +600,32 @@ class PostgresDatabase:
             is_premium = row['is_premium'] or False
             last_check_timestamp = row['last_whale_check_timestamp']
 
-            # Проверяем, прошло ли RESET_HOURS часов с последней попытки
-            if last_check_timestamp and checks_today > 0:
-                try:
-                    reset_threshold = last_check_timestamp + timedelta(hours=RESET_HOURS)
+            # Проверяем, нужно ли сбросить счётчик
+            should_reset = False
 
-                    if datetime.now() >= reset_threshold:
-                        # Прошло достаточно времени - сбрасываем счётчик
-                        await conn.execute(
-                            """
-                            UPDATE user_settings
-                            SET whale_checks_today = 0, last_whale_check_timestamp = NULL
-                            WHERE user_id = $1
-                            """,
-                            user_id
-                        )
-                        checks_today = 0
-                except (ValueError, TypeError):
-                    pass
+            if checks_today > 0:
+                if last_check_timestamp is None:
+                    # Старые данные без timestamp - сбрасываем
+                    should_reset = True
+                else:
+                    try:
+                        reset_threshold = last_check_timestamp + timedelta(hours=RESET_HOURS)
+
+                        if datetime.now() >= reset_threshold:
+                            should_reset = True
+                    except (ValueError, TypeError):
+                        should_reset = True
+
+            if should_reset:
+                await conn.execute(
+                    """
+                    UPDATE user_settings
+                    SET whale_checks_today = 0, last_whale_check_timestamp = NULL
+                    WHERE user_id = $1
+                    """,
+                    user_id
+                )
+                checks_today = 0
 
             # Max checks: 3 for free, 5 for premium
             max_checks = 5 if is_premium else 3
@@ -649,13 +657,17 @@ class PostgresDatabase:
 
                 # Проверяем, прошло ли RESET_HOURS часов
                 should_reset = False
-                if last_check_timestamp and checks_today > 0:
-                    try:
-                        reset_threshold = last_check_timestamp + timedelta(hours=RESET_HOURS)
-                        if datetime.now() >= reset_threshold:
-                            should_reset = True
-                    except (ValueError, TypeError):
+                if checks_today > 0:
+                    if last_check_timestamp is None:
+                        # Старые данные без timestamp - сбрасываем
                         should_reset = True
+                    else:
+                        try:
+                            reset_threshold = last_check_timestamp + timedelta(hours=RESET_HOURS)
+                            if datetime.now() >= reset_threshold:
+                                should_reset = True
+                        except (ValueError, TypeError):
+                            should_reset = True
 
                 if should_reset:
                     # Сбрасываем и ставим 1
@@ -769,22 +781,32 @@ class PostgresDatabase:
             is_premium = row['is_premium'] or False
             last_report_timestamp = row['last_address_report_timestamp']
 
-            # Проверяем, прошло ли RESET_HOURS часов с последнего отчёта
-            if last_report_timestamp and reports_today > 0:
-                try:
-                    reset_threshold = last_report_timestamp + timedelta(hours=RESET_HOURS)
+            # Проверяем, нужно ли сбросить счётчик
+            should_reset = False
 
-                    if datetime.now() >= reset_threshold:
-                        # Прошло достаточно времени - сбрасываем счётчик
-                        await conn.execute(
-                            """
-                            UPDATE user_settings
-                            SET address_reports_today = 0, last_address_report_timestamp = NULL
-                            WHERE user_id = $1
-                            """,
-                            user_id
-                        )
-                        reports_today = 0
+            if reports_today > 0:
+                if last_report_timestamp is None:
+                    # Старые данные без timestamp - сбрасываем
+                    should_reset = True
+                else:
+                    try:
+                        reset_threshold = last_report_timestamp + timedelta(hours=RESET_HOURS)
+
+                        if datetime.now() >= reset_threshold:
+                            should_reset = True
+                    except (ValueError, TypeError):
+                        should_reset = True
+
+            if should_reset:
+                await conn.execute(
+                    """
+                    UPDATE user_settings
+                    SET address_reports_today = 0, last_address_report_timestamp = NULL
+                    WHERE user_id = $1
+                    """,
+                    user_id
+                )
+                reports_today = 0
                 except (ValueError, TypeError):
                     pass
 
@@ -808,13 +830,17 @@ class PostgresDatabase:
 
                 # Проверяем, прошло ли RESET_HOURS часов
                 should_reset = False
-                if last_report_timestamp and reports_today > 0:
-                    try:
-                        reset_threshold = last_report_timestamp + timedelta(hours=RESET_HOURS)
-                        if datetime.now() >= reset_threshold:
-                            should_reset = True
-                    except (ValueError, TypeError):
+                if reports_today > 0:
+                    if last_report_timestamp is None:
+                        # Старые данные без timestamp - сбрасываем
                         should_reset = True
+                    else:
+                        try:
+                            reset_threshold = last_report_timestamp + timedelta(hours=RESET_HOURS)
+                            if datetime.now() >= reset_threshold:
+                                should_reset = True
+                        except (ValueError, TypeError):
+                            should_reset = True
 
                 if should_reset:
                     await conn.execute(
