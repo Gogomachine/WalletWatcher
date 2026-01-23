@@ -463,9 +463,24 @@ async def cmd_track(message: Message):
         await message.reply("❌ Неверный формат адреса Solana")
         return
 
+    # Check favorites limit for FREE users
+    user_id = message.from_user.id
+    settings = await database.get_user_settings(user_id)
+    is_premium = settings.get('is_premium', 0)
+    if not is_premium:
+        favorites_count = await database.get_favorites_count(user_id)
+        if favorites_count >= 2:
+            await message.reply(
+                "⛔ <b>Лимит FREE подписки</b>\n\n"
+                "Максимум 2 адреса в избранном.\n"
+                "Оформите премиум для безлимитного отслеживания!",
+                parse_mode="HTML"
+            )
+            return
+
     # Добавляем в отслеживание
     success = await database.add_tracked_address(
-        message.from_user.id,
+        user_id,
         address,
         None
     )
@@ -664,9 +679,27 @@ async def skip_nickname_callback(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Ошибка: адрес не найден", show_alert=True)
         return
 
+    # Check favorites limit for FREE users
+    user_id = callback.from_user.id
+    settings = await database.get_user_settings(user_id)
+    is_premium = settings.get('is_premium', 0)
+    if not is_premium:
+        favorites_count = await database.get_favorites_count(user_id)
+        if favorites_count >= 2:
+            await callback.message.edit_text(
+                "⛔ <b>Лимит FREE подписки</b>\n\n"
+                "Максимум 2 адреса в избранном.\n"
+                "Оформите премиум для безлимитного отслеживания!",
+                parse_mode="HTML",
+                reply_markup=get_main_menu()
+            )
+            await state.clear()
+            await callback.answer()
+            return
+
     # Добавляем без никнейма
     success = await database.add_tracked_address(
-        callback.from_user.id,
+        user_id,
         address,
         None
     )
@@ -782,9 +815,25 @@ async def process_nickname(message: Message, state: FSMContext):
     address = data['address']
     nickname = message.text.strip()
 
+    # Check favorites limit for FREE users
+    user_id = message.from_user.id
+    settings = await database.get_user_settings(user_id)
+    is_premium = settings.get('is_premium', 0)
+    if not is_premium:
+        favorites_count = await database.get_favorites_count(user_id)
+        if favorites_count >= 2:
+            await message.reply(
+                "⛔ <b>Лимит FREE подписки</b>\n\n"
+                "Максимум 2 адреса в избранном.\n"
+                "Оформите премиум для безлимитного отслеживания!",
+                parse_mode="HTML"
+            )
+            await state.clear()
+            return
+
     # Добавляем адрес в отслеживание
     success = await database.add_tracked_address(
-        message.from_user.id,
+        user_id,
         address,
         nickname
     )
@@ -808,6 +857,28 @@ async def check_address(message: Message, address: str):
         message: Message object
         address: Solana address
     """
+    user_id = message.from_user.id
+
+    # Check daily limit for address reports
+    reports_used, max_reports = await database.get_address_reports_remaining(user_id)
+    remaining = max_reports - reports_used
+
+    if remaining <= 0:
+        settings = await database.get_user_settings(user_id)
+        is_premium = settings.get('is_premium', 0)
+        if not is_premium:
+            await message.reply(
+                "⛔ <b>Лимит исчерпан</b>\n\n"
+                "Вы использовали все 10 бесплатных запросов на сегодня.\n\n"
+                "💡 Оформите премиум подписку для безлимитных запросов\n"
+                "или вернитесь завтра (лимит обнуляется в 00:00)",
+                parse_mode="HTML"
+            )
+            return
+
+    # Increment counter
+    await database.increment_address_report(user_id)
+
     status_msg = await message.reply("⏳ Получаю информацию...")
 
     info = await blockchain_client.get_wallet_info(address)
@@ -952,6 +1023,19 @@ async def add_to_favorites_callback(callback: CallbackQuery):
     if any(addr['address'] == address for addr in existing):
         await callback.answer("⚠️ Этот адрес уже в избранном!", show_alert=True)
         return
+
+    # Check favorites limit for FREE users
+    settings = await database.get_user_settings(user_id)
+    is_premium = settings.get('is_premium', 0)
+    if not is_premium:
+        favorites_count = await database.get_favorites_count(user_id)
+        if favorites_count >= 2:
+            await callback.answer(
+                "⛔ Лимит FREE: максимум 2 адреса в избранном.\n"
+                "Оформите премиум для безлимита!",
+                show_alert=True
+            )
+            return
 
     # Add to tracked addresses without nickname
     await database.add_tracked_address(user_id, address, None)
@@ -1105,6 +1189,21 @@ async def process_group_name(message: Message, state: FSMContext):
     if len(group_name) > 50:
         await message.reply("❌ Название группы слишком длинное (максимум 50 символов)")
         return
+
+    # Check groups limit for FREE users
+    settings = await database.get_user_settings(user_id)
+    is_premium = settings.get('is_premium', 0)
+    if not is_premium:
+        groups_count = await database.get_groups_count(user_id)
+        if groups_count >= 1:
+            await message.reply(
+                "⛔ <b>Лимит FREE подписки</b>\n\n"
+                "Максимум 1 группа.\n"
+                "Оформите премиум для безлимитного количества групп!",
+                parse_mode="HTML"
+            )
+            await state.clear()
+            return
 
     success = await database.create_group(user_id, group_name)
 

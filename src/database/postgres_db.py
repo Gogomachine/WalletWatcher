@@ -104,6 +104,16 @@ class PostgresDatabase:
                     SET whale_checks_today = 0
                     WHERE whale_checks_today IS NULL
                 """)
+
+                # Add address report limits columns
+                await conn.execute("""
+                    ALTER TABLE user_settings
+                    ADD COLUMN IF NOT EXISTS address_reports_today INTEGER DEFAULT 0
+                """)
+                await conn.execute("""
+                    ALTER TABLE user_settings
+                    ADD COLUMN IF NOT EXISTS last_address_report_date DATE
+                """)
             except Exception as e:
                 # Columns might already exist
                 pass
@@ -666,3 +676,94 @@ class PostgresDatabase:
                 user_id, is_premium
             )
             return True
+
+    # ==================== FREE SUBSCRIPTION LIMITS ====================
+
+    async def get_address_reports_remaining(self, user_id: int) -> tuple[int, int]:
+        """Get remaining address reports for today.
+
+        Returns:
+            Tuple of (reports_used_today, max_reports)
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE user_settings
+                SET address_reports_today = 0, last_address_report_date = CURRENT_DATE
+                WHERE user_id = $1
+                AND (last_address_report_date IS NULL OR last_address_report_date != CURRENT_DATE)
+                """,
+                user_id
+            )
+
+            row = await conn.fetchrow(
+                "SELECT address_reports_today, is_premium FROM user_settings WHERE user_id = $1",
+                user_id
+            )
+
+            if not row:
+                await conn.execute(
+                    "INSERT INTO user_settings (user_id, address_reports_today, last_address_report_date) VALUES ($1, 0, CURRENT_DATE)",
+                    user_id
+                )
+                return (0, 10)
+
+            reports_today = row['address_reports_today'] or 0
+            is_premium = row['is_premium'] or False
+            max_reports = 999999 if is_premium else 10
+
+            return (reports_today, max_reports)
+
+    async def increment_address_report(self, user_id: int) -> bool:
+        """Increment address report counter for today."""
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO user_settings (user_id, address_reports_today, last_address_report_date)
+                VALUES ($1, 1, CURRENT_DATE)
+                ON CONFLICT (user_id) DO UPDATE
+                SET address_reports_today = CASE
+                        WHEN user_settings.last_address_report_date IS NULL OR user_settings.last_address_report_date != CURRENT_DATE THEN 1
+                        ELSE COALESCE(user_settings.address_reports_today, 0) + 1
+                    END,
+                    last_address_report_date = CURRENT_DATE
+                """,
+                user_id
+            )
+            return True
+
+    async def get_favorites_count(self, user_id: int) -> int:
+        """Get count of tracked addresses for user."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT COUNT(*) as cnt FROM tracked_addresses WHERE user_id = $1",
+                user_id
+            )
+            return row['cnt'] if row else 0
+
+    async def get_groups_count(self, user_id: int) -> int:
+        """Get count of groups for user."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT COUNT(*) as cnt FROM address_groups WHERE user_id = $1",
+                user_id
+            )
+            return row['cnt'] if row else 0
+
+    async def get_free_limits(self, user_id: int) -> dict:
+        """Get all FREE subscription limits for user."""
+        settings = await self.get_user_settings(user_id)
+        is_premium = settings.get('is_premium', False)
+
+        reports_used, max_reports = await self.get_address_reports_remaining(user_id)
+        whale_used, max_whale = await self.get_whale_checks_remaining(user_id)
+        favorites_count = await self.get_favorites_count(user_id)
+        groups_count = await self.get_groups_count(user_id)
+
+        return {
+            'is_premium': bool(is_premium),
+            'reports': {'used': reports_used, 'max': max_reports, 'remaining': max_reports - reports_used},
+            'whale': {'used': whale_used, 'max': max_whale, 'remaining': max_whale - whale_used},
+            'favorites': {'count': favorites_count, 'max': 999999 if is_premium else 2},
+            'groups': {'count': groups_count, 'max': 999999 if is_premium else 1},
+        }
