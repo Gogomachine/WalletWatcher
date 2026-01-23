@@ -1501,21 +1501,81 @@ async def buy_whale_check_callback(callback: CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(F.data == "menu_subscription")
+async def menu_subscription_callback(callback: CallbackQuery):
+    """Show subscription info page."""
+    user_id = callback.from_user.id
+    settings = await database.get_user_settings(user_id)
+    is_premium = settings.get('is_premium', 0)
+
+    if is_premium:
+        msg = (
+            "💎 <b>Ваша подписка: PREMIUM</b>\n\n"
+            "✅ Безлимитное отслеживание адресов\n"
+            "✅ Безлимитное создание групп\n"
+            "✅ 5 попыток 'Подсмотреть' в день\n"
+            "✅ Безлимитные запросы по адресам\n\n"
+            "<i>Спасибо за поддержку!</i> 🙏"
+        )
+        buttons = [[InlineKeyboardButton(text="🔙 Назад", callback_data="cancel")]]
+    else:
+        limits = await database.get_free_limits(user_id)
+        msg = (
+            "📋 <b>Ваша подписка: FREE</b>\n\n"
+            f"👀 Подсмотреть: {limits['whale']['remaining']}/{limits['whale']['max']} сегодня\n"
+            f"📊 Запросы по адресам: {limits['reports']['remaining']}/{limits['reports']['max']} сегодня\n"
+            f"⭐ Избранное: {limits['favorites']['count']}/{limits['favorites']['max']} адресов\n"
+            f"📁 Группы: {limits['groups']['count']}/{limits['groups']['max']}\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "💎 <b>PREMIUM подписка</b>\n\n"
+            "✨ Безлимитное отслеживание адресов\n"
+            "✨ Безлимитное создание групп\n"
+            "✨ 5 попыток 'Подсмотреть' в день\n"
+            "✨ Безлимитные запросы по адресам\n\n"
+            "💰 <b>Цена: 1 ⭐</b> (тестовый период)"
+        )
+        buttons = [
+            [InlineKeyboardButton(text="💎 Купить Premium (1 ⭐)", callback_data="buy_premium")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="cancel")]
+        ]
+
+    await callback.message.edit_text(
+        msg,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "buy_premium")
 async def buy_premium_callback(callback: CallbackQuery):
-    """Handle premium subscription purchase (coming soon)."""
-    await callback.answer(
-        "💎 Премиум подписка скоро будет доступна!\n\n"
-        "Преимущества премиум:\n"
-        "• 5 попыток 'Подсмотреть' в день вместо 3\n"
-        "• Расширенная статистика\n"
-        "• Приоритетная поддержка\n\n"
-        "Следите за обновлениями!",
-        show_alert=True
+    """Handle premium subscription purchase."""
+    user_id = callback.from_user.id
+
+    # Check if already premium
+    settings = await database.get_user_settings(user_id)
+    if settings.get('is_premium', 0):
+        await callback.answer("💎 Вы уже Premium пользователь!", show_alert=True)
+        return
+
+    # Create invoice for Telegram Stars (1 star for testing)
+    prices = [LabeledPrice(label="Premium подписка", amount=1)]
+
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    await callback.message.answer_invoice(
+        title="💎 Premium подписка",
+        description="Безлимитное отслеживание адресов и групп\n5 попыток 'Подсмотреть' в день\nБезлимитные запросы по адресам",
+        payload=f"premium:{user_id}",
+        provider_token="",  # Empty for Telegram Stars
+        currency="XTR",
+        prices=prices
     )
 
-    # TODO: Implement premium subscription
-    # Price TBD - maybe 100-500 stars/month
+    await callback.answer()
 
 
 @router.pre_checkout_query()
@@ -1533,19 +1593,36 @@ async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
 async def process_successful_payment(message: Message):
     """
     Handle successful payment.
-    Grant the user additional whale check attempt.
+    Grant the user premium status or additional whale check attempt.
     """
     payment = message.successful_payment
     user_id = message.from_user.id
 
     # Parse payload to determine what was purchased
-    payload = payment.invoice_payload  # Format: "whale_check:user_id:price"
+    payload = payment.invoice_payload
 
     try:
         parts = payload.split(":")
-        if len(parts) >= 1 and parts[0] == "whale_check":
+
+        if parts[0] == "premium":
+            # User bought premium subscription
+            await database.update_premium_status(user_id, True)
+
+            await message.answer(
+                "🎉 <b>Добро пожаловать в Premium!</b>\n\n"
+                "✅ Безлимитное отслеживание адресов\n"
+                "✅ Безлимитное создание групп\n"
+                "✅ 5 попыток 'Подсмотреть' в день\n"
+                "✅ Безлимитные запросы по адресам\n\n"
+                "<i>Спасибо за поддержку! 💎</i>",
+                parse_mode="HTML",
+                reply_markup=get_main_menu()
+            )
+
+            print(f"💎 Premium purchased: {payment.total_amount} XTR from user {user_id}")
+
+        elif parts[0] == "whale_check":
             # User bought additional whale check
-            # Decrement their counter by 1 (giving them 1 more attempt)
             await database.decrement_whale_check(user_id)
 
             checks_used, max_checks = await database.get_whale_checks_remaining(user_id)
@@ -1559,13 +1636,12 @@ async def process_successful_payment(message: Message):
                 parse_mode="HTML"
             )
 
-            # Log payment for analytics
-            print(f"💰 Payment received: {payment.total_amount} XTR from user {user_id}")
+            print(f"💰 Whale check purchased: {payment.total_amount} XTR from user {user_id}")
 
     except Exception as e:
         print(f"❌ Error processing payment: {e}")
         await message.answer(
-            "⚠️ Оплата прошла успешно, но произошла ошибка при начислении попытки.\n\n"
+            "⚠️ Оплата прошла успешно, но произошла ошибка.\n\n"
             "Пожалуйста, свяжитесь с поддержкой.",
             parse_mode="HTML"
         )
