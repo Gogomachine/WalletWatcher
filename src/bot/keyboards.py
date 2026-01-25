@@ -284,20 +284,35 @@ def get_whale_limit_exceeded_keyboard(checks_used: int) -> InlineKeyboardMarkup:
     Returns:
         Inline keyboard with purchase options
     """
-    # Calculate price for next check (1000 stars * check number)
-    # 4th check = 1000 stars
-    # 5th check = 2000 stars
-    # 6th check = 3000 stars, etc.
-    next_check_num = checks_used + 1
-    free_checks = 3  # Number of free checks
-    paid_check_index = next_check_num - free_checks  # 1, 2, 3...
-    price_stars = paid_check_index * 1000
+    # Attempt packages with discounts:
+    # 1 attempt = 100 stars (base price)
+    # 5 attempts = 400 stars (20% discount, was 500)
+    # 10 attempts = 700 stars (30% discount, was 1000)
+    # 25 attempts = 1500 stars (40% discount, was 2500)
 
     buttons = [
         [
             InlineKeyboardButton(
-                text=f"⭐ Купить 1 попытку ({price_stars} звезд)",
-                callback_data=f"buy_whale_check_{price_stars}"
+                text="⭐ 1 попытка — 100 ⭐",
+                callback_data="buy_whale_check_1_100"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🔥 5 попыток — 400 ⭐ (скидка 20%)",
+                callback_data="buy_whale_check_5_400"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="💥 10 попыток — 700 ⭐ (скидка 30%)",
+                callback_data="buy_whale_check_10_700"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🚀 25 попыток — 1500 ⭐ (скидка 40%)",
+                callback_data="buy_whale_check_25_1500"
             )
         ],
         [
