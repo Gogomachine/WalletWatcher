@@ -409,7 +409,7 @@ async def text_subscription_button(message: Message):
             "✅ Безлимитное отслеживание адресов\n"
             "✅ Безлимитное создание групп\n"
             "✅ 5 попыток 'Подсмотреть' в день\n"
-            "   <i>(дополнительные: 1000, 2000, 3000 ⭐ и т.д.)</i>\n"
+            "   <i>(дополнительные: от 100 ⭐, пакеты со скидкой до 40%)</i>\n"
             "✅ 20 АМЛ отчетов в месяц <i>(скоро)</i>\n"
             "✅ Доступ в Discord и VIP Telegram\n"
             "✅ Бонусы при эйрдропе 🎁\n\n"
@@ -429,7 +429,7 @@ async def text_subscription_button(message: Message):
             "✨ Безлимитное отслеживание адресов\n"
             "✨ Безлимитное создание групп\n"
             "✨ 5 попыток 'Подсмотреть' в день\n"
-            "   <i>(дополнительные: 1000, 2000, 3000 ⭐ и т.д.)</i>\n"
+            "   <i>(дополнительные: от 100 ⭐, пакеты со скидкой до 40%)</i>\n"
             "✨ 20 АМЛ отчетов в месяц <i>(скоро)</i>\n"
             "✨ Доступ в Discord и VIP Telegram\n"
             "✨ Бонусы при эйрдропе 🎁\n\n"
@@ -1497,17 +1497,32 @@ async def show_settings_callback(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("buy_whale_check_"))
 async def buy_whale_check_callback(callback: CallbackQuery):
-    """Handle purchase of additional whale check via Telegram Stars."""
+    """Handle purchase of additional whale check(s) via Telegram Stars.
+
+    Callback data format: buy_whale_check_{attempts}_{price}
+    """
     try:
-        price_stars = int(callback.data.split("_")[-1])
+        # Parse callback data: buy_whale_check_5_400 -> attempts=5, price=400
+        parts = callback.data.split("_")
+        attempts = int(parts[3])  # Number of attempts to purchase
+        price_stars = int(parts[4])  # Price in stars
     except Exception:
-        await callback.answer("❌ Ошибка в цене", show_alert=True)
+        await callback.answer("❌ Ошибка в данных", show_alert=True)
         return
 
     user_id = callback.from_user.id
 
-    # Create invoice for Telegram Stars
-    prices = [LabeledPrice(label="Дополнительная попытка 'Подсмотреть'", amount=price_stars)]
+    # Create invoice label based on attempts count
+    if attempts == 1:
+        label = "Дополнительная попытка 'Подсмотреть'"
+        title = "🎰 Дополнительная попытка"
+        description = "Купить 1 дополнительную попытку 'Подсмотреть'.\n\nВы сможете найти адрес с призовым балансом!"
+    else:
+        label = f"{attempts} попыток 'Подсмотреть'"
+        title = f"🎰 Пакет: {attempts} попыток"
+        description = f"Купить {attempts} дополнительных попыток 'Подсмотреть'.\n\nВы сможете найти адрес с призовым балансом!"
+
+    prices = [LabeledPrice(label=label, amount=price_stars)]
 
     # Delete previous message and send invoice
     try:
@@ -1516,9 +1531,9 @@ async def buy_whale_check_callback(callback: CallbackQuery):
         pass
 
     await callback.message.answer_invoice(
-        title="🎰 Дополнительная попытка",
-        description=f"Купить 1 дополнительную попытку 'Подсмотреть' в лотерее.\n\nВы сможете найти адрес с призовым балансом!",
-        payload=f"whale_check:{user_id}:{price_stars}",
+        title=title,
+        description=description,
+        payload=f"whale_check:{user_id}:{attempts}:{price_stars}",
         provider_token="",  # Empty for Telegram Stars
         currency="XTR",  # Telegram Stars currency code
         prices=prices
@@ -1540,7 +1555,7 @@ async def menu_subscription_callback(callback: CallbackQuery):
             "✅ Безлимитное отслеживание адресов\n"
             "✅ Безлимитное создание групп\n"
             "✅ 5 попыток 'Подсмотреть' в день\n"
-            "   <i>(дополнительные: 1000, 2000, 3000 ⭐ и т.д.)</i>\n"
+            "   <i>(дополнительные: от 100 ⭐, пакеты со скидкой до 40%)</i>\n"
             "✅ 20 АМЛ отчетов в месяц <i>(скоро)</i>\n"
             "✅ Доступ в Discord и VIP Telegram\n"
             "✅ Бонусы при эйрдропе 🎁\n\n"
@@ -1560,7 +1575,7 @@ async def menu_subscription_callback(callback: CallbackQuery):
             "✨ Безлимитное отслеживание адресов\n"
             "✨ Безлимитное создание групп\n"
             "✨ 5 попыток 'Подсмотреть' в день\n"
-            "   <i>(дополнительные: 1000, 2000, 3000 ⭐ и т.д.)</i>\n"
+            "   <i>(дополнительные: от 100 ⭐, пакеты со скидкой до 40%)</i>\n"
             "✨ 20 АМЛ отчетов в месяц <i>(скоро)</i>\n"
             "✨ Доступ в Discord и VIP Telegram\n"
             "✨ Бонусы при эйрдропе 🎁\n\n"
@@ -1651,7 +1666,7 @@ async def process_successful_payment(message: Message):
                 "✅ Безлимитное отслеживание адресов\n"
                 "✅ Безлимитное создание групп\n"
                 "✅ 5 попыток 'Подсмотреть' в день\n"
-                "   <i>(дополнительные: 1000, 2000, 3000 ⭐ и т.д.)</i>\n"
+                "   <i>(дополнительные: от 100 ⭐, пакеты со скидкой до 40%)</i>\n"
                 "✅ 20 АМЛ отчетов в месяц <i>(скоро)</i>\n"
                 "✅ Доступ в Discord и VIP Telegram\n"
                 "✅ Бонусы при эйрдропе 🎁\n\n"
@@ -1663,21 +1678,31 @@ async def process_successful_payment(message: Message):
             print(f"💎 Premium purchased: {payment.total_amount} XTR from user {user_id}")
 
         elif parts[0] == "whale_check":
-            # User bought additional whale check
-            await database.decrement_whale_check(user_id)
+            # User bought additional whale check(s)
+            # Payload format: whale_check:{user_id}:{attempts}:{price}
+            attempts = int(parts[2]) if len(parts) > 2 else 1
+
+            # Grant attempts by decrementing counter multiple times
+            for _ in range(attempts):
+                await database.decrement_whale_check(user_id)
 
             checks_used, max_checks = await database.get_whale_checks_remaining(user_id)
             remaining = max_checks - checks_used
 
+            if attempts == 1:
+                attempts_text = "1 дополнительная попытка"
+            else:
+                attempts_text = f"{attempts} дополнительных попыток"
+
             await message.answer(
                 f"✅ <b>Оплата успешна!</b>\n\n"
-                f"💫 Вам начислена 1 дополнительная попытка 'Подсмотреть'\n"
-                f"👀 Осталось попыток сегодня: {remaining}\n\n"
+                f"💫 Вам начислено {attempts_text} 'Подсмотреть'\n"
+                f"👀 Осталось попыток: {remaining}\n\n"
                 f"<i>Спасибо за поддержку! Удачи в поиске призового адреса! 🎰</i>",
                 parse_mode="HTML"
             )
 
-            print(f"💰 Whale check purchased: {payment.total_amount} XTR from user {user_id}")
+            print(f"💰 Whale check purchased: {attempts} attempts for {payment.total_amount} XTR from user {user_id}")
 
     except Exception as e:
         print(f"❌ Error processing payment: {e}")
