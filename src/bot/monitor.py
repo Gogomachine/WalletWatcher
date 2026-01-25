@@ -2,10 +2,14 @@
 
 import asyncio
 from datetime import datetime
-from typing import Callable
+from typing import Callable, Dict
 from ..solana.client import SolanaClient
 from ..database.db import Database
 from ..utils.screenshot import take_transaction_screenshot
+
+# Cooldown period after notification (in seconds)
+# Prevents spam from high-activity wallets (e.g., exchange wallets)
+NOTIFICATION_COOLDOWN = 60
 
 
 class AddressMonitor:
@@ -32,6 +36,8 @@ class AddressMonitor:
         self.interval = interval
         self.running = False
         self._task = None
+        # Track cooldowns per address to prevent notification spam
+        self._address_cooldowns: Dict[str, datetime] = {}
 
     async def start(self):
         """Start monitoring addresses."""
@@ -91,6 +97,36 @@ class AddressMonitor:
             else:
                 print(f"✅ Batch {batch_num}/{len(batches)}: all {len(batch)} addresses checked")
 
+    def _is_address_on_cooldown(self, address: str) -> bool:
+        """Check if address is on notification cooldown.
+
+        Args:
+            address: Solana address to check
+
+        Returns:
+            True if address is on cooldown and should be skipped
+        """
+        if address not in self._address_cooldowns:
+            return False
+
+        last_notification = self._address_cooldowns[address]
+        elapsed = (datetime.now() - last_notification).total_seconds()
+
+        if elapsed < NOTIFICATION_COOLDOWN:
+            return True
+
+        # Cooldown expired, remove from dict
+        del self._address_cooldowns[address]
+        return False
+
+    def _set_address_cooldown(self, address: str):
+        """Set cooldown for an address after sending notification.
+
+        Args:
+            address: Solana address to set cooldown for
+        """
+        self._address_cooldowns[address] = datetime.now()
+
     async def _check_address(self, record: dict):
         """Check a single address for new transactions.
 
@@ -99,6 +135,10 @@ class AddressMonitor:
         """
         address = record['address']
         last_known_sig = record['last_signature']
+
+        # Skip if address is on cooldown (prevents spam from high-activity wallets)
+        if self._is_address_on_cooldown(address):
+            return
 
         # Get latest transaction
         last_tx = await self.solana_client.get_last_transaction(address)
@@ -115,25 +155,18 @@ class AddressMonitor:
 
         # Check if there's a new transaction
         if current_sig != last_known_sig:
-            # Get all new transactions
-            signatures = await self.solana_client.get_transaction_signatures(
-                address,
-                limit=100
-            )
-
-            # Find new transactions (those after last_known_sig)
-            new_transactions = []
-            for sig in signatures:
-                if sig['signature'] == last_known_sig:
-                    break
-                new_transactions.append(sig)
-
-            # Update last known signature
+            # Update last known signature FIRST (reset to current time)
+            # This way next scan will start fresh, ignoring any transactions
+            # that happened during the cooldown period
             await self.database.update_last_signature(record['id'], current_sig)
 
-            # Send notifications for new transactions (in reverse order - oldest first)
-            for tx in reversed(new_transactions):
-                await self._send_notification(record, tx)
+            # Send notification only for the LATEST transaction
+            # (no need to show all transactions from high-activity wallets)
+            await self._send_notification(record, last_tx)
+
+            # Set cooldown to prevent notification spam
+            self._set_address_cooldown(address)
+            print(f"⏰ Address {address[:8]}... on {NOTIFICATION_COOLDOWN}s cooldown")
 
     async def _send_notification(self, record: dict, transaction: dict):
         """Send notification about new transaction.
