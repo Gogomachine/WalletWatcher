@@ -741,11 +741,11 @@ class Database:
                 (user_id,)
             )
 
-            # Decrement counter (but don't go below 0)
+            # Decrement counter (negative = bonus attempts)
             await db.execute(
                 """
                 UPDATE user_settings
-                SET whale_checks_today = MAX(0, whale_checks_today - 1)
+                SET whale_checks_today = whale_checks_today - 1
                 WHERE user_id = ?
                 """,
                 (user_id,)
@@ -777,7 +777,7 @@ class Database:
             await db.execute(
                 """
                 UPDATE user_settings
-                SET whale_checks_today = MAX(0, COALESCE(whale_checks_today, 0) - ?)
+                SET whale_checks_today = COALESCE(whale_checks_today, 0) - ?
                 WHERE user_id = ?
                 """,
                 (amount, user_id)
