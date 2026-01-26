@@ -216,11 +216,14 @@ class AdminStates(StatesGroup):
     waiting_for_attempts_user_id = State()
 
 
-# ==================== ADMIN CONFIGURATION ====================
-# Load admin IDs from environment variable (comma-separated)
-ADMIN_IDS_STR = os.getenv("ADMIN_IDS", "")
-ADMIN_IDS = [int(x.strip()) for x in ADMIN_IDS_STR.split(",") if x.strip().isdigit()]
-# =============================================================
+def get_admin_ids() -> list:
+    """Get admin IDs from environment variable (loaded dynamically).
+
+    Returns:
+        List of admin Telegram user IDs
+    """
+    admin_ids_str = os.getenv("ADMIN_IDS", "")
+    return [int(x.strip()) for x in admin_ids_str.split(",") if x.strip().isdigit()]
 
 
 def is_admin(user_id: int) -> bool:
@@ -232,7 +235,7 @@ def is_admin(user_id: int) -> bool:
     Returns:
         True if user is admin
     """
-    return user_id in ADMIN_IDS
+    return user_id in get_admin_ids()
 
 
 # Глобальные переменные для клиентов (будут инициализированы в main.py)
@@ -1862,7 +1865,7 @@ async def admin_stats(callback: CallbackQuery):
             "📊 <b>Статистика бота</b>\n\n"
             f"👥 Активных пользователей: {unique_users}\n"
             f"📍 Отслеживаемых адресов: {total_addresses}\n"
-            f"🔐 Админов: {len(ADMIN_IDS)}\n"
+            f"🔐 Админов: {len(get_admin_ids())}\n"
         )
 
         await callback.message.edit_text(
