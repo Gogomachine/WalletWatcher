@@ -733,6 +733,38 @@ class PostgresDatabase:
             )
             return True
 
+    async def add_whale_checks(self, user_id: int, amount: int) -> bool:
+        """Add whale check attempts to user (admin function).
+
+        Args:
+            user_id: Telegram user ID
+            amount: Number of attempts to add
+
+        Returns:
+            True if added successfully
+        """
+        async with self.pool.acquire() as conn:
+            # Ensure user settings exist
+            await conn.execute(
+                """
+                INSERT INTO user_settings (user_id, whale_checks_today)
+                VALUES ($1, 0)
+                ON CONFLICT (user_id) DO NOTHING
+                """,
+                user_id
+            )
+
+            # Decrease counter to give more attempts (negative checks = more available)
+            await conn.execute(
+                """
+                UPDATE user_settings
+                SET whale_checks_today = GREATEST(0, COALESCE(whale_checks_today, 0) - $2)
+                WHERE user_id = $1
+                """,
+                user_id, amount
+            )
+            return True
+
     async def update_premium_status(self, user_id: int, is_premium: bool) -> bool:
         """Update premium status for user.
 
@@ -807,8 +839,6 @@ class PostgresDatabase:
                     user_id
                 )
                 reports_today = 0
-                except (ValueError, TypeError):
-                    pass
 
             max_reports = 999999 if is_premium else 10
 

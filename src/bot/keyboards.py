@@ -275,6 +275,46 @@ def get_persistent_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
+def get_admin_panel_keyboard() -> InlineKeyboardMarkup:
+    """Get admin panel keyboard.
+
+    Returns:
+        Admin panel inline keyboard
+    """
+    buttons = [
+        [InlineKeyboardButton(text="👤 Найти пользователя", callback_data="admin_find_user")],
+        [InlineKeyboardButton(text="💎 Выдать премиум", callback_data="admin_give_premium")],
+        [InlineKeyboardButton(text="❌ Убрать премиум", callback_data="admin_remove_premium")],
+        [InlineKeyboardButton(text="🎁 Выдать попытки", callback_data="admin_give_attempts")],
+        [InlineKeyboardButton(text="📊 Статистика бота", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="cancel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_admin_user_actions_keyboard(user_id: int, is_premium: bool) -> InlineKeyboardMarkup:
+    """Get admin actions keyboard for a specific user.
+
+    Args:
+        user_id: Target user ID
+        is_premium: Whether user currently has premium
+
+    Returns:
+        Admin user actions inline keyboard
+    """
+    premium_text = "❌ Убрать премиум" if is_premium else "💎 Выдать премиум"
+    premium_action = f"admin_toggle_premium_{user_id}"
+
+    buttons = [
+        [InlineKeyboardButton(text=premium_text, callback_data=premium_action)],
+        [InlineKeyboardButton(text="🎁 +1 попытка", callback_data=f"admin_add_attempts_{user_id}_1")],
+        [InlineKeyboardButton(text="🎁 +5 попыток", callback_data=f"admin_add_attempts_{user_id}_5")],
+        [InlineKeyboardButton(text="🎁 +10 попыток", callback_data=f"admin_add_attempts_{user_id}_10")],
+        [InlineKeyboardButton(text="🔙 Админ панель", callback_data="admin_panel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def get_whale_limit_exceeded_keyboard(checks_used: int) -> InlineKeyboardMarkup:
     """Get keyboard for when whale check limit is exceeded.
 
