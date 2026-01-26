@@ -104,15 +104,11 @@ async def _perform_whale_check(message: Message, user_id: int, show_remaining: b
 
     if remaining <= 0:
         # Limit exceeded - show payment options
-        settings = await database.get_user_settings(user_id)
-        is_premium = settings.get('is_premium', 0)
-
         limit_msg = (
             "⛔ <b>Лимит исчерпан</b>\n\n"
-            f"Вы использовали все {'5' if is_premium else '3'} бесплатные попытки.\n"
-            f"Попыток использовано: {checks_used}\n\n"
+            "У вас закончились попытки 'Подсмотреть'.\n\n"
             "💡 Вы можете:\n"
-            "• Купить дополнительную попытку за Telegram Stars\n"
+            "• Купить дополнительные попытки за Telegram Stars\n"
             "• Оформить премиум подписку (5 попыток/день)\n"
             "• Подождать 24 часа с момента последней попытки"
         )
@@ -129,7 +125,7 @@ async def _perform_whale_check(message: Message, user_id: int, show_remaining: b
 
     status_msg = await message.answer(
         f"👀 Подсматриваю...\n\n"
-        f"<i>Осталось попыток сегодня: {remaining - 1}</i>",
+        f"<i>Осталось попыток: {remaining - 1}</i>",
         parse_mode="HTML"
     )
 
@@ -159,7 +155,7 @@ async def _perform_whale_check(message: Message, user_id: int, show_remaining: b
     msg = "👀 <b>Подсмотрел!</b>\n\n"
     msg += format_wallet_info(info)
     if show_remaining:
-        msg += f"\n\n<i>💫 Осталось попыток сегодня: {remaining - 1}</i>"
+        msg += f"\n\n<i>💫 Осталось попыток: {remaining - 1}</i>"
 
     # Try to get screenshot from Solscan
     await status_msg.edit_text(get_random_peek_phrase())
@@ -377,7 +373,7 @@ async def text_profile_button(message: Message):
         f"📋 Отслеживаемых адресов: {count}\n"
         f"📁 Групп: {len(groups)}\n\n"
         f"💎 <b>Подписка:</b> {subscription_status}\n"
-        f"👀 <b>Подсмотреть:</b> {remaining_checks}/{max_checks} попыток осталось\n\n"
+        f"👀 <b>Подсмотреть:</b> {remaining_checks} попыток\n\n"
         f"<i>Лимит обновляется через 24 часа после последней попытки</i>",
         parse_mode="HTML"
     )
@@ -454,11 +450,11 @@ async def text_subscription_button(message: Message):
         limits = await database.get_free_limits(user_id)
         msg = (
             "📋 <b>Ваша подписка: FREE</b>\n\n"
-            f"👀 Подсмотреть: {limits['whale']['remaining']}/{limits['whale']['max']} сегодня\n"
+            f"👀 Подсмотреть: {limits['whale']['remaining']} попыток\n"
             f"📊 Запросы по адресам: {limits['reports']['remaining']}/{limits['reports']['max']} сегодня\n"
             f"⭐ Избранное: {limits['favorites']['count']}/{limits['favorites']['max']} адресов\n"
             f"📁 Группы: {limits['groups']['count']}/{limits['groups']['max']}\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "💎 <b>PREMIUM подписка</b>\n\n"
             "✨ Безлимитное отслеживание адресов\n"
             "✨ Безлимитное создание групп\n"
@@ -690,7 +686,7 @@ async def menu_profile_callback(callback: CallbackQuery):
         f"📋 Отслеживаемых адресов: {count}\n"
         f"📁 Групп: {len(groups)}\n\n"
         f"💎 <b>Подписка:</b> {subscription_status}\n"
-        f"👀 <b>Подсмотреть:</b> {remaining_checks}/{max_checks} попыток осталось\n\n"
+        f"👀 <b>Подсмотреть:</b> {remaining_checks} попыток\n\n"
         f"<i>Лимит обновляется через 24 часа после последней попытки</i>",
         parse_mode="HTML",
         reply_markup=get_main_menu()
@@ -1600,11 +1596,11 @@ async def menu_subscription_callback(callback: CallbackQuery):
         limits = await database.get_free_limits(user_id)
         msg = (
             "📋 <b>Ваша подписка: FREE</b>\n\n"
-            f"👀 Подсмотреть: {limits['whale']['remaining']}/{limits['whale']['max']} сегодня\n"
+            f"👀 Подсмотреть: {limits['whale']['remaining']} попыток\n"
             f"📊 Запросы по адресам: {limits['reports']['remaining']}/{limits['reports']['max']} сегодня\n"
             f"⭐ Избранное: {limits['favorites']['count']}/{limits['favorites']['max']} адресов\n"
             f"📁 Группы: {limits['groups']['count']}/{limits['groups']['max']}\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "💎 <b>PREMIUM подписка</b>\n\n"
             "✨ Безлимитное отслеживание адресов\n"
             "✨ Безлимитное создание групп\n"
@@ -1902,14 +1898,11 @@ async def admin_process_user_id(message: Message, state: FSMContext):
     limits = await database.get_free_limits(target_user_id)
 
     is_premium = settings.get('is_premium', 0)
-    whale_used = limits['whale']['used']
-    whale_max = limits['whale']['max']
     whale_remaining = limits['whale']['remaining']
 
     user_info = (
         f"👤 <b>Пользователь #{target_user_id}</b>\n\n"
         f"💎 Премиум: {'Да' if is_premium else 'Нет'}\n"
-        f"👀 Попыток использовано: {whale_used}/{whale_max}\n"
         f"👀 Попыток осталось: {whale_remaining}\n"
         f"📍 Избранных адресов: {limits['favorites']['count']}\n"
         f"📁 Групп: {limits['groups']['count']}\n"
@@ -2028,14 +2021,11 @@ async def admin_toggle_premium(callback: CallbackQuery):
 
     # Update message
     limits = await database.get_free_limits(target_user_id)
-    whale_used = limits['whale']['used']
-    whale_max = limits['whale']['max']
     whale_remaining = limits['whale']['remaining']
 
     user_info = (
         f"👤 <b>Пользователь #{target_user_id}</b>\n\n"
         f"💎 Премиум: {'Да' if new_status else 'Нет'}\n"
-        f"👀 Попыток использовано: {whale_used}/{whale_max}\n"
         f"👀 Попыток осталось: {whale_remaining}\n"
         f"📍 Избранных адресов: {limits['favorites']['count']}\n"
         f"📁 Групп: {limits['groups']['count']}\n"
@@ -2069,14 +2059,11 @@ async def admin_add_attempts(callback: CallbackQuery):
     limits = await database.get_free_limits(target_user_id)
 
     is_premium = settings.get('is_premium', 0)
-    whale_used = limits['whale']['used']
-    whale_max = limits['whale']['max']
     whale_remaining = limits['whale']['remaining']
 
     user_info = (
         f"👤 <b>Пользователь #{target_user_id}</b>\n\n"
         f"💎 Премиум: {'Да' if is_premium else 'Нет'}\n"
-        f"👀 Попыток использовано: {whale_used}/{whale_max}\n"
         f"👀 Попыток осталось: {whale_remaining}\n"
         f"📍 Избранных адресов: {limits['favorites']['count']}\n"
         f"📁 Групп: {limits['groups']['count']}\n"
