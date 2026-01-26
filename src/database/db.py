@@ -753,6 +753,38 @@ class Database:
             await db.commit()
             return True
 
+    async def add_whale_checks(self, user_id: int, amount: int) -> bool:
+        """Add whale check attempts to user (admin function).
+
+        Args:
+            user_id: Telegram user ID
+            amount: Number of attempts to add
+
+        Returns:
+            True if added successfully
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            # Ensure user settings exist
+            await db.execute(
+                """
+                INSERT OR IGNORE INTO user_settings (user_id, whale_checks_today)
+                VALUES (?, 0)
+                """,
+                (user_id,)
+            )
+
+            # Decrease counter to give more attempts (negative checks = more available)
+            await db.execute(
+                """
+                UPDATE user_settings
+                SET whale_checks_today = MAX(0, COALESCE(whale_checks_today, 0) - ?)
+                WHERE user_id = ?
+                """,
+                (amount, user_id)
+            )
+            await db.commit()
+            return True
+
     async def update_premium_status(self, user_id: int, is_premium: bool) -> bool:
         """Update premium status for user.
 

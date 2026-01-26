@@ -1,5 +1,6 @@
 """Bot command handlers."""
 
+import os
 import random
 from datetime import datetime
 from pathlib import Path
@@ -22,7 +23,9 @@ from .keyboards import (
     get_whale_result_keyboard,
     get_persistent_keyboard,
     get_group_addresses_keyboard,
-    get_whale_limit_exceeded_keyboard
+    get_whale_limit_exceeded_keyboard,
+    get_admin_panel_keyboard,
+    get_admin_user_actions_keyboard
 )
 from ..blockchain.universal_client import UniversalBlockchainClient, detect_address_type
 from ..database.db import Database
@@ -205,6 +208,33 @@ class RenameStates(StatesGroup):
     waiting_for_new_nickname = State()
 
 
+class AdminStates(StatesGroup):
+    """States for admin operations."""
+    waiting_for_user_id = State()
+    waiting_for_premium_user_id = State()
+    waiting_for_remove_premium_user_id = State()
+    waiting_for_attempts_user_id = State()
+
+
+# ==================== ADMIN CONFIGURATION ====================
+# Load admin IDs from environment variable (comma-separated)
+ADMIN_IDS_STR = os.getenv("ADMIN_IDS", "")
+ADMIN_IDS = [int(x.strip()) for x in ADMIN_IDS_STR.split(",") if x.strip().isdigit()]
+# =============================================================
+
+
+def is_admin(user_id: int) -> bool:
+    """Check if user is an admin.
+
+    Args:
+        user_id: Telegram user ID
+
+    Returns:
+        True if user is admin
+    """
+    return user_id in ADMIN_IDS
+
+
 # Глобальные переменные для клиентов (будут инициализированы в main.py)
 blockchain_client: UniversalBlockchainClient = None
 database: Database = None
@@ -285,7 +315,8 @@ async def cmd_help(message: Message):
         "/list - Мои отслеживаемые адреса\n"
         "/whale - Подсмотреть (случайный адрес)\n"
         "/analysis - Анализ (скоро)\n"
-        "/settings - Настройки\n\n"
+        "/settings - Настройки\n"
+        "/admin - Админ-панель (только для админов)\n\n"
         "<b>Получение информации:</b>\n"
         "Просто отправьте Solana адрес, и я покажу всю информацию о нём:\n"
         "• Баланс в SOL\n"
@@ -1711,6 +1742,351 @@ async def process_successful_payment(message: Message):
             "Пожалуйста, свяжитесь с поддержкой.",
             parse_mode="HTML"
         )
+
+
+# ==================== ADMIN COMMANDS ====================
+
+
+@router.message(Command("admin"))
+async def cmd_admin(message: Message):
+    """Handle /admin command - show admin panel."""
+    user_id = message.from_user.id
+
+    if not is_admin(user_id):
+        await message.reply("❌ У вас нет прав администратора.")
+        return
+
+    await message.answer(
+        "🔐 <b>Админ-панель</b>\n\n"
+        "Выберите действие:",
+        parse_mode="HTML",
+        reply_markup=get_admin_panel_keyboard()
+    )
+
+
+@router.callback_query(F.data == "admin_panel")
+async def admin_panel_callback(callback: CallbackQuery):
+    """Show admin panel."""
+    user_id = callback.from_user.id
+
+    if not is_admin(user_id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        "🔐 <b>Админ-панель</b>\n\n"
+        "Выберите действие:",
+        parse_mode="HTML",
+        reply_markup=get_admin_panel_keyboard()
+    )
+
+
+@router.callback_query(F.data == "admin_find_user")
+async def admin_find_user(callback: CallbackQuery, state: FSMContext):
+    """Admin: find user by ID."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        "👤 <b>Поиск пользователя</b>\n\n"
+        "Введите Telegram ID пользователя:",
+        parse_mode="HTML",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(AdminStates.waiting_for_user_id)
+
+
+@router.callback_query(F.data == "admin_give_premium")
+async def admin_give_premium(callback: CallbackQuery, state: FSMContext):
+    """Admin: give premium to user."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        "💎 <b>Выдать премиум</b>\n\n"
+        "Введите Telegram ID пользователя:",
+        parse_mode="HTML",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(AdminStates.waiting_for_premium_user_id)
+
+
+@router.callback_query(F.data == "admin_remove_premium")
+async def admin_remove_premium(callback: CallbackQuery, state: FSMContext):
+    """Admin: remove premium from user."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        "❌ <b>Убрать премиум</b>\n\n"
+        "Введите Telegram ID пользователя:",
+        parse_mode="HTML",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(AdminStates.waiting_for_remove_premium_user_id)
+
+
+@router.callback_query(F.data == "admin_give_attempts")
+async def admin_give_attempts(callback: CallbackQuery, state: FSMContext):
+    """Admin: give free attempts to user."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        "🎁 <b>Выдать попытки</b>\n\n"
+        "Введите Telegram ID пользователя:",
+        parse_mode="HTML",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(AdminStates.waiting_for_attempts_user_id)
+
+
+@router.callback_query(F.data == "admin_stats")
+async def admin_stats(callback: CallbackQuery):
+    """Admin: show bot statistics."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    # Get stats from database
+    try:
+        all_addresses = await database.get_all_tracked_addresses()
+        total_addresses = len(all_addresses)
+        unique_users = len(set(addr['user_id'] for addr in all_addresses))
+
+        stats_msg = (
+            "📊 <b>Статистика бота</b>\n\n"
+            f"👥 Активных пользователей: {unique_users}\n"
+            f"📍 Отслеживаемых адресов: {total_addresses}\n"
+            f"🔐 Админов: {len(ADMIN_IDS)}\n"
+        )
+
+        await callback.message.edit_text(
+            stats_msg,
+            parse_mode="HTML",
+            reply_markup=get_admin_panel_keyboard()
+        )
+    except Exception as e:
+        await callback.message.edit_text(
+            f"❌ Ошибка получения статистики: {e}",
+            parse_mode="HTML",
+            reply_markup=get_admin_panel_keyboard()
+        )
+
+
+@router.message(StateFilter(AdminStates.waiting_for_user_id))
+async def admin_process_user_id(message: Message, state: FSMContext):
+    """Process user ID input for admin search."""
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+
+    try:
+        target_user_id = int(message.text.strip())
+    except ValueError:
+        await message.reply(
+            "❌ Некорректный ID. Введите числовой Telegram ID.",
+            reply_markup=get_cancel_keyboard()
+        )
+        return
+
+    # Get user info
+    settings = await database.get_user_settings(target_user_id)
+    limits = await database.get_free_limits(target_user_id)
+
+    is_premium = settings.get('is_premium', 0)
+    whale_used = limits['whale']['used']
+    whale_max = limits['whale']['max']
+    whale_remaining = limits['whale']['remaining']
+
+    user_info = (
+        f"👤 <b>Пользователь #{target_user_id}</b>\n\n"
+        f"💎 Премиум: {'Да' if is_premium else 'Нет'}\n"
+        f"👀 Попыток использовано: {whale_used}/{whale_max}\n"
+        f"👀 Попыток осталось: {whale_remaining}\n"
+        f"📍 Избранных адресов: {limits['favorites']['count']}\n"
+        f"📁 Групп: {limits['groups']['count']}\n"
+    )
+
+    await state.clear()
+    await message.answer(
+        user_info,
+        parse_mode="HTML",
+        reply_markup=get_admin_user_actions_keyboard(target_user_id, bool(is_premium))
+    )
+
+
+@router.message(StateFilter(AdminStates.waiting_for_premium_user_id))
+async def admin_process_premium_user_id(message: Message, state: FSMContext):
+    """Process user ID for giving premium."""
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+
+    try:
+        target_user_id = int(message.text.strip())
+    except ValueError:
+        await message.reply(
+            "❌ Некорректный ID. Введите числовой Telegram ID.",
+            reply_markup=get_cancel_keyboard()
+        )
+        return
+
+    # Give premium
+    await database.update_premium_status(target_user_id, True)
+
+    await state.clear()
+    await message.answer(
+        f"✅ Премиум выдан пользователю #{target_user_id}",
+        parse_mode="HTML",
+        reply_markup=get_admin_panel_keyboard()
+    )
+
+
+@router.message(StateFilter(AdminStates.waiting_for_remove_premium_user_id))
+async def admin_process_remove_premium_user_id(message: Message, state: FSMContext):
+    """Process user ID for removing premium."""
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+
+    try:
+        target_user_id = int(message.text.strip())
+    except ValueError:
+        await message.reply(
+            "❌ Некорректный ID. Введите числовой Telegram ID.",
+            reply_markup=get_cancel_keyboard()
+        )
+        return
+
+    # Remove premium
+    await database.update_premium_status(target_user_id, False)
+
+    await state.clear()
+    await message.answer(
+        f"✅ Премиум убран у пользователя #{target_user_id}",
+        parse_mode="HTML",
+        reply_markup=get_admin_panel_keyboard()
+    )
+
+
+@router.message(StateFilter(AdminStates.waiting_for_attempts_user_id))
+async def admin_process_attempts_user_id(message: Message, state: FSMContext):
+    """Process user ID for giving attempts."""
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+
+    try:
+        target_user_id = int(message.text.strip())
+    except ValueError:
+        await message.reply(
+            "❌ Некорректный ID. Введите числовой Telegram ID.",
+            reply_markup=get_cancel_keyboard()
+        )
+        return
+
+    # Get user info
+    settings = await database.get_user_settings(target_user_id)
+    is_premium = settings.get('is_premium', 0)
+
+    await state.clear()
+    await message.answer(
+        f"🎁 <b>Выдать попытки пользователю #{target_user_id}</b>\n\n"
+        "Выберите количество попыток:",
+        parse_mode="HTML",
+        reply_markup=get_admin_user_actions_keyboard(target_user_id, bool(is_premium))
+    )
+
+
+@router.callback_query(F.data.startswith("admin_toggle_premium_"))
+async def admin_toggle_premium(callback: CallbackQuery):
+    """Admin: toggle premium for user."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    target_user_id = int(callback.data.split("_")[-1])
+
+    # Get current status
+    settings = await database.get_user_settings(target_user_id)
+    is_premium = settings.get('is_premium', 0)
+
+    # Toggle premium
+    new_status = not bool(is_premium)
+    await database.update_premium_status(target_user_id, new_status)
+
+    status_text = "выдан" if new_status else "убран"
+    await callback.answer(f"✅ Премиум {status_text}!", show_alert=True)
+
+    # Update message
+    limits = await database.get_free_limits(target_user_id)
+    whale_used = limits['whale']['used']
+    whale_max = limits['whale']['max']
+    whale_remaining = limits['whale']['remaining']
+
+    user_info = (
+        f"👤 <b>Пользователь #{target_user_id}</b>\n\n"
+        f"💎 Премиум: {'Да' if new_status else 'Нет'}\n"
+        f"👀 Попыток использовано: {whale_used}/{whale_max}\n"
+        f"👀 Попыток осталось: {whale_remaining}\n"
+        f"📍 Избранных адресов: {limits['favorites']['count']}\n"
+        f"📁 Групп: {limits['groups']['count']}\n"
+    )
+
+    await callback.message.edit_text(
+        user_info,
+        parse_mode="HTML",
+        reply_markup=get_admin_user_actions_keyboard(target_user_id, new_status)
+    )
+
+
+@router.callback_query(F.data.startswith("admin_add_attempts_"))
+async def admin_add_attempts(callback: CallbackQuery):
+    """Admin: add attempts to user."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    parts = callback.data.split("_")
+    target_user_id = int(parts[3])
+    amount = int(parts[4])
+
+    # Add attempts
+    await database.add_whale_checks(target_user_id, amount)
+
+    await callback.answer(f"✅ Добавлено {amount} попыток!", show_alert=True)
+
+    # Update message
+    settings = await database.get_user_settings(target_user_id)
+    limits = await database.get_free_limits(target_user_id)
+
+    is_premium = settings.get('is_premium', 0)
+    whale_used = limits['whale']['used']
+    whale_max = limits['whale']['max']
+    whale_remaining = limits['whale']['remaining']
+
+    user_info = (
+        f"👤 <b>Пользователь #{target_user_id}</b>\n\n"
+        f"💎 Премиум: {'Да' if is_premium else 'Нет'}\n"
+        f"👀 Попыток использовано: {whale_used}/{whale_max}\n"
+        f"👀 Попыток осталось: {whale_remaining}\n"
+        f"📍 Избранных адресов: {limits['favorites']['count']}\n"
+        f"📁 Групп: {limits['groups']['count']}\n"
+    )
+
+    await callback.message.edit_text(
+        user_info,
+        parse_mode="HTML",
+        reply_markup=get_admin_user_actions_keyboard(target_user_id, bool(is_premium))
+    )
+
+
+# ==================== END ADMIN COMMANDS ====================
 
 
 # Автоматическая проверка адресов в сообщениях
