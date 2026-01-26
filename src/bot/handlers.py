@@ -10,6 +10,7 @@ from aiogram.types import (
     Message, CallbackQuery, FSInputFile, InlineKeyboardMarkup,
     InlineKeyboardButton, LabeledPrice, PreCheckoutQuery
 )
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ChatType
@@ -2031,11 +2032,14 @@ async def admin_toggle_premium(callback: CallbackQuery):
         f"📁 Групп: {limits['groups']['count']}\n"
     )
 
-    await callback.message.edit_text(
-        user_info,
-        parse_mode="HTML",
-        reply_markup=get_admin_user_actions_keyboard(target_user_id, new_status)
-    )
+    try:
+        await callback.message.edit_text(
+            user_info,
+            parse_mode="HTML",
+            reply_markup=get_admin_user_actions_keyboard(target_user_id, new_status)
+        )
+    except TelegramBadRequest:
+        pass  # Message not modified - ignore
 
 
 @router.callback_query(F.data.startswith("admin_add_attempts_"))
@@ -2069,11 +2073,14 @@ async def admin_add_attempts(callback: CallbackQuery):
         f"📁 Групп: {limits['groups']['count']}\n"
     )
 
-    await callback.message.edit_text(
-        user_info,
-        parse_mode="HTML",
-        reply_markup=get_admin_user_actions_keyboard(target_user_id, bool(is_premium))
-    )
+    try:
+        await callback.message.edit_text(
+            user_info,
+            parse_mode="HTML",
+            reply_markup=get_admin_user_actions_keyboard(target_user_id, bool(is_premium))
+        )
+    except TelegramBadRequest:
+        pass  # Message not modified - ignore
 
 
 # ==================== END ADMIN COMMANDS ====================
