@@ -15,6 +15,7 @@ from src.evm import EVMClient
 from src.blockchain import UniversalBlockchainClient
 from src.database import Database
 from src.bot import router, init_handlers, AddressMonitor
+from src.aml import init_aml_handlers, register_aml_handlers
 
 
 # Загрузка переменных окружения
@@ -137,6 +138,11 @@ async def main():
 
     # Инициализация обработчиков
     init_handlers(blockchain_client, database, monitor)
+
+    # Инициализация AML Shield
+    logger.info("Initializing AML Shield...")
+    init_aml_handlers(database)
+    register_aml_handlers(dp)
 
     # Регистрация роутера
     dp.include_router(router)
