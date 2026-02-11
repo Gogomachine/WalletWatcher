@@ -971,3 +971,149 @@ class Database:
             'favorites': {'count': favorites_count, 'max': 999999 if is_premium else 2},
             'groups': {'count': groups_count, 'max': 999999 if is_premium else 1},
         }
+
+    # ==================== AML SHIELD ====================
+
+    async def _init_aml_tables(self):
+        """Initialize AML-related tables."""
+        async with aiosqlite.connect(self.db_path) as db:
+            # Table for AML conversations
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS aml_conversations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Index for faster queries
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_aml_conversations_user
+                ON aml_conversations(user_id, created_at DESC)
+            """)
+
+            # Table for AML usage tracking
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS aml_usage (
+                    user_id INTEGER PRIMARY KEY,
+                    questions_today INTEGER DEFAULT 0,
+                    last_reset DATE DEFAULT CURRENT_DATE
+                )
+            """)
+
+            await db.commit()
+
+    async def get_aml_questions_today(self, user_id: int) -> int:
+        """Get number of AML questions asked today.
+
+        Args:
+            user_id: Telegram user ID
+
+        Returns:
+            Number of questions asked today
+        """
+        await self._init_aml_tables()
+
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            async with db.execute(
+                "SELECT questions_today, last_reset FROM aml_usage WHERE user_id = ?",
+                (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+
+                if not row:
+                    return 0
+
+                # Check if we need to reset (new day)
+                from datetime import date
+                last_reset = row['last_reset']
+                if last_reset:
+                    if isinstance(last_reset, str):
+                        last_reset = date.fromisoformat(last_reset)
+                    if last_reset < date.today():
+                        # Reset counter
+                        await db.execute(
+                            "UPDATE aml_usage SET questions_today = 0, last_reset = CURRENT_DATE WHERE user_id = ?",
+                            (user_id,)
+                        )
+                        await db.commit()
+                        return 0
+
+                return row['questions_today'] or 0
+
+    async def increment_aml_questions(self, user_id: int):
+        """Increment AML questions counter.
+
+        Args:
+            user_id: Telegram user ID
+        """
+        await self._init_aml_tables()
+
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO aml_usage (user_id, questions_today, last_reset)
+                VALUES (?, 1, CURRENT_DATE)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    questions_today = CASE
+                        WHEN last_reset < CURRENT_DATE THEN 1
+                        ELSE questions_today + 1
+                    END,
+                    last_reset = CURRENT_DATE
+                """,
+                (user_id,)
+            )
+            await db.commit()
+
+    async def save_aml_conversation(self, user_id: int, question: str, answer: str):
+        """Save AML conversation to database.
+
+        Args:
+            user_id: Telegram user ID
+            question: User's question
+            answer: AI's answer
+        """
+        await self._init_aml_tables()
+
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "INSERT INTO aml_conversations (user_id, role, content) VALUES (?, 'user', ?)",
+                (user_id, question)
+            )
+            await db.execute(
+                "INSERT INTO aml_conversations (user_id, role, content) VALUES (?, 'assistant', ?)",
+                (user_id, answer)
+            )
+            await db.commit()
+
+    async def get_aml_conversation_history(self, user_id: int, limit: int = 4) -> list:
+        """Get AML conversation history for context.
+
+        Args:
+            user_id: Telegram user ID
+            limit: Number of message pairs to retrieve
+
+        Returns:
+            List of conversation messages
+        """
+        await self._init_aml_tables()
+
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            async with db.execute(
+                """
+                SELECT role, content FROM aml_conversations
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (user_id, limit * 2)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                # Reverse to get chronological order
+                return [{"role": row['role'], "content": row['content']} for row in reversed(rows)]

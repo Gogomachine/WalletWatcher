@@ -20,3 +20,6 @@ redis[asyncio]>=5.0.1
 
 # Screenshots
 playwright>=1.40.0
+
+# AI / AML Shield
+anthropic>=0.40.0
