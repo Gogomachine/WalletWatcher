@@ -16,7 +16,7 @@ def get_main_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📋 Мои адреса", callback_data="menu_list")
         ],
         [InlineKeyboardButton(text="👀 Подсмотреть", callback_data="menu_whale")],
-        [InlineKeyboardButton(text="🔍 Анализ", callback_data="menu_analysis")],
+        [InlineKeyboardButton(text="🛡️ AML Shield", callback_data="menu_aml")],
         [InlineKeyboardButton(text="💎 Подписка", callback_data="menu_subscription")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu_settings")],
     ]

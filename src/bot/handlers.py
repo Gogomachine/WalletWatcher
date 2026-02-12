@@ -666,13 +666,28 @@ async def menu_list_callback(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data == "menu_analysis")
-async def menu_analysis_callback(callback: CallbackQuery):
-    """Handle 'Analysis' menu button."""
+@router.callback_query(F.data == "menu_aml")
+async def menu_aml_callback(callback: CallbackQuery):
+    """Handle 'AML Shield' menu button."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🧹 Что такое грязная крипта?", callback_data="aml_dirty")],
+        [InlineKeyboardButton(text="🔄 Безопасен ли P2P?", callback_data="aml_p2p")],
+        [InlineKeyboardButton(text="🧊 Заморозили счёт!", callback_data="aml_frozen")],
+        [InlineKeyboardButton(text="⚠️ Красные флаги", callback_data="aml_redflags")],
+        [InlineKeyboardButton(text="🛡️ Как проверить крипту?", callback_data="aml_check")],
+        [InlineKeyboardButton(text="💬 Задать свой вопрос", callback_data="aml_ask")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")],
+    ])
+
     await callback.message.edit_text(
-        "🔍 <b>Анализ</b>\n\n"
-        "Скоро здесь появятся отчеты безопасности и настоящий АМЛ как у крутышек 😎",
-        reply_markup=get_main_menu(),
+        "🛡️ <b>AML Shield</b> — твой помощник по крипто-безопасности\n\n"
+        "Я помогу разобраться в:\n"
+        "• Грязной крипте и как от неё защититься\n"
+        "• Рисках P2P-сделок\n"
+        "• Заморозке счетов на биржах\n"
+        "• Проверке адресов перед сделкой\n\n"
+        "Выбери действие или просто задай вопрос:",
+        reply_markup=keyboard,
         parse_mode="HTML"
     )
     await callback.answer()
