@@ -138,6 +138,134 @@ async def callback_aml_detail(callback: CallbackQuery):
     await system.press_office.send_detailed_report(bot, chat_id, verdict)
 
 
+# ============================================================
+# Feedback handlers — самообучение Офицера
+# ============================================================
+
+@aml_check_router.callback_query(F.data.startswith("fb_"))
+async def callback_feedback(callback: CallbackQuery):
+    """Handle feedback buttons for Officer self-learning."""
+    await callback.answer()
+
+    data = callback.data  # fb_correct_CASE-XXXXX, fb_incorrect_..., fb_too_high_..., fb_too_low_...
+
+    # Parse feedback type and case_id
+    parts = data.split("_", 2)
+    if len(parts) < 3:
+        return
+
+    feedback_type = parts[1]  # correct, incorrect, too_high, too_low
+    # Handle two-word types: too_high, too_low
+    if feedback_type == "too":
+        sub_parts = data.split("_", 3)
+        if len(sub_parts) < 4:
+            return
+        feedback_type = f"{sub_parts[1]}_{sub_parts[2]}"  # too_high or too_low
+        case_id = sub_parts[3]
+    else:
+        case_id = parts[2]
+
+    verdict = _verdict_cache.get(case_id)
+    if not verdict:
+        await callback.message.answer(
+            "\u26a0\ufe0f Результат устарел. Запустите проверку заново.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    system = get_agent_system()
+    if not system or not system.learning_engine:
+        await callback.message.answer(
+            "\u26a0\ufe0f Система обучения недоступна.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    user_id = callback.from_user.id
+
+    await system.learning_engine.record_feedback(
+        case_id=case_id,
+        user_id=user_id,
+        address=verdict.address,
+        network=verdict.network,
+        risk_score=verdict.risk_score,
+        risk_level=verdict.risk_level.label,
+        reason=verdict.reason,
+        feedback_type=feedback_type,
+    )
+
+    feedback_labels = {
+        "correct": "\u2705 Спасибо! Отмечено как верный вердикт.",
+        "incorrect": "\u274c Спасибо! Отмечено как неверный. Офицер учтёт.",
+        "too_high": "\u2b06\ufe0f Спасибо! Отмечено как завышенный риск.",
+        "too_low": "\u2b07\ufe0f Спасибо! Отмечено как заниженный риск.",
+    }
+
+    response_text = feedback_labels.get(
+        feedback_type, "\u2705 Фидбек принят."
+    )
+
+    # Показать статистику обучения
+    stats = await system.learning_engine.get_stats()
+    response_text += (
+        f"\n\n<i>\U0001f9e0 Поколение #{stats['generation']} | "
+        f"Точность: {stats['accuracy']} | "
+        f"Правил: {stats['active_rules']}</i>"
+    )
+
+    await callback.message.answer(response_text, parse_mode=ParseMode.HTML)
+
+
+# ============================================================
+# /brain command — статистика обучения
+# ============================================================
+
+@aml_check_router.message(Command("brain"))
+async def cmd_brain(message: Message):
+    """Show Officer learning statistics and evolved rules."""
+    system = get_agent_system()
+    if not system or not system.learning_engine:
+        await message.reply(
+            "\u26a0\ufe0f Система обучения не инициализирована.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    stats = await system.learning_engine.get_stats()
+    rules = await system.learning_engine.get_learned_rules_display()
+
+    text = (
+        "\U0001f9e0 <b>TxPeek — Мозг Офицера</b>\n\n"
+        f"<b>Поколение:</b> #{stats['generation']}\n"
+        f"<b>Точность:</b> {stats['accuracy']}\n"
+        f"<b>Всего фидбеков:</b> {stats['total_feedback']}\n"
+        f"<b>Из них верных:</b> {stats['correct_feedback']}\n"
+        f"<b>Активных правил:</b> {stats['active_rules']}\n"
+        f"<b>До следующей эволюции:</b> {stats['next_evolution_in']} кейсов\n"
+    )
+
+    if rules:
+        text += "\n<b>Выученные правила:</b>\n"
+        for i, rule in enumerate(rules[:10], 1):
+            text += (
+                f"\n{i}. {rule['rule']}\n"
+                f"   <i>Уверенность: {rule['confidence']} | "
+                f"Источник: {rule['source']}</i>\n"
+            )
+    else:
+        text += (
+            "\n<i>Правил пока нет. Оставляйте фидбек после проверок, "
+            "и Офицер начнёт учиться!</i>"
+        )
+
+    text += (
+        "\n\n<i>\U0001f4a1 Оставляйте фидбек кнопками под результатами "
+        "проверок — это помогает Офицеру эволюционировать.</i>"
+    )
+
+    await message.reply(text, parse_mode=ParseMode.HTML)
+
+
 @aml_check_router.callback_query(F.data.startswith("aml_screenshot_"))
 async def callback_aml_screenshot(callback: CallbackQuery):
     """Send the screenshot from AML check."""
