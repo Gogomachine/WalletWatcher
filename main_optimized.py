@@ -17,6 +17,8 @@ from src.database.postgres_db import PostgresDatabase
 from src.cache.redis_cache import RedisCache
 from src.bot import router, init_handlers, AddressMonitor
 from src.utils.screenshot_optimized import get_screenshot_service
+from src.agents import AgentSystem, set_agent_system
+from src.agents.handlers import register_aml_check_handlers
 
 
 # Load environment variables
@@ -156,10 +158,22 @@ async def main():
         interval=monitor_interval
     )
 
+    # Initialize multi-agent AML system
+    logger.info("🛡️  Initializing TxPeek agent system...")
+    agent_system = AgentSystem(
+        database=database,
+        solana_client=solana_client,
+        blockchain_client=blockchain_client,
+        screenshot_service=screenshot_service,
+    )
+    await agent_system.initialize()
+    set_agent_system(agent_system)
+
     # Initialize handlers
     init_handlers(blockchain_client, database, monitor)
 
-    # Register router
+    # Register routers (AML check router first for /txpeek command priority)
+    register_aml_check_handlers(dp)
     dp.include_router(router)
 
     # Start monitor
@@ -183,6 +197,7 @@ async def main():
     logger.info(f"   - Redis cache: enabled")
     logger.info(f"   - Screenshot service: browser reuse enabled")
     logger.info(f"   - Monitor batch size: 50 addresses/batch")
+    logger.info(f"   - TxPeek agent system: active (5 agents)")
 
     try:
         await dp.start_polling(bot)

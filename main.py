@@ -16,6 +16,8 @@ from src.blockchain import UniversalBlockchainClient
 from src.database import Database
 from src.bot import router, init_handlers, AddressMonitor
 from src.aml import init_aml_handlers, register_aml_handlers
+from src.agents import AgentSystem, set_agent_system
+from src.agents.handlers import register_aml_check_handlers
 
 
 # Загрузка переменных окружения
@@ -136,6 +138,16 @@ async def main():
         interval=monitor_interval
     )
 
+    # Initialize multi-agent AML system
+    logger.info("Initializing TxPeek agent system...")
+    agent_system = AgentSystem(
+        database=database,
+        solana_client=solana_client,
+        blockchain_client=blockchain_client,
+    )
+    await agent_system.initialize()
+    set_agent_system(agent_system)
+
     # Инициализация обработчиков
     init_handlers(blockchain_client, database, monitor)
 
@@ -143,6 +155,9 @@ async def main():
     logger.info("Initializing AML Shield...")
     init_aml_handlers(database)
     register_aml_handlers(dp)
+
+    # Register AML check handlers
+    register_aml_check_handlers(dp)
 
     # Регистрация роутера
     dp.include_router(router)
