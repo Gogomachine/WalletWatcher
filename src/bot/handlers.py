@@ -597,10 +597,17 @@ async def cmd_settings(message: Message):
 
 @router.message(Command("analysis"))
 async def cmd_analysis(message: Message):
-    """Handle /analysis command."""
+    """Handle /analysis command - redirect to /txpeek."""
     await message.reply(
-        "🔍 <b>Анализ</b>\n\n"
-        "Скоро здесь появятся отчеты безопасности и настоящий АМЛ как у крутышек 😎",
+        "🔍 <b>AML-Анализ</b>\n\n"
+        "Используйте <code>/txpeek &lt;адрес&gt;</code> для полной AML-проверки адреса.\n\n"
+        "Или просто отправьте адрес — я проверю его автоматически.\n\n"
+        "Проверяю по:\n"
+        "• Санкционным спискам OFAC SDN\n"
+        "• Базе ChainAbuse\n"
+        "• Статусу заморозки USDT/USDC\n"
+        "• Лейблам эксплореров\n"
+        "• Паттернам транзакций",
         parse_mode="HTML"
     )
 
