@@ -70,18 +70,39 @@ OFAC_SANCTIONED_ADDRESSES = {
 CHAINABUSE_CATEGORIES = ["scam", "ransomware", "theft", "fraud", "darknet", "terrorist_financing"]
 
 
+VERIFIER_SYSTEM_PROMPT = """Ты — Проверятор (Verifier) системы TxPeek.
+Твоя роль — compliance-аналитик. Ты получаешь результаты проверок по санкционным базам,
+блэклистам и cross-analysis с данными Расследователя.
+
+ЗАДАЧИ:
+1. Оценить compliance-статус адреса
+2. Проверить прямые совпадения (OFAC, заморозка, ChainAbuse)
+3. Оценить связи 1-hop и 2-hop с санкционными адресами
+4. Сформировать итоговый risk score (0-100)
+
+ПРАВИЛА:
+- False positive лучше false negative
+- Если OFAC/заморозка = 100 баллов сразу
+- Учитывать смягчающие факторы (KYC-биржи, возраст кошелька)
+- Ответ на РУССКОМ
+- Кратко: 2-4 предложения с обоснованием score
+- Формат: только текст анализа, без JSON"""
+
+
 class VerifierAgent(BaseAgent):
     """Verifier agent - compliance checks and risk scoring."""
 
     name = "Verifier"
+    system_prompt = VERIFIER_SYSTEM_PROMPT
 
-    def __init__(self, solana_client=None):
+    def __init__(self, solana_client=None, api_key=None):
         """Initialize Verifier.
 
         Args:
             solana_client: SolanaClient for on-chain freeze checks
+            api_key: Anthropic API key
         """
-        super().__init__()
+        super().__init__(api_key=api_key)
         self.solana_client = solana_client
 
     async def process(self, message: AgentMessage) -> AgentMessage:
@@ -138,6 +159,9 @@ class VerifierAgent(BaseAgent):
 
         # 7. Calculate final risk score
         self._calculate_risk_score(investigator_data, report)
+
+        # 8. LLM-обогащение рекомендации
+        await self._llm_enrich(address, report)
 
         return self._create_response(
             recipient="Officer",
@@ -435,6 +459,38 @@ class VerifierAgent(BaseAgent):
             report.exposure_level = "none"
 
         report.cross_analysis_notes = notes
+
+    async def _llm_enrich(self, address: str, report: VerifierReport):
+        """Use Claude API to enrich risk assessment with reasoning."""
+        import json
+
+        summary = {
+            "risk_score": report.risk_score,
+            "ofac_sdn": report.ofac_sdn.value,
+            "chainabuse_status": report.chainabuse_status.value,
+            "chainabuse_reports": report.chainabuse_reports,
+            "usdt_frozen": report.usdt_frozen.value,
+            "usdc_frozen": report.usdc_frozen.value,
+            "explorer_labels": report.explorer_labels.value,
+            "score_factors": report.score_factors,
+            "mitigating_factors": report.mitigating_factors,
+            "cross_analysis_notes": report.cross_analysis_notes,
+            "exposure_level": report.exposure_level,
+        }
+
+        prompt = (
+            f"Результаты compliance-проверки адреса {address[:12]}...:\n\n"
+            f"{json.dumps(summary, ensure_ascii=False, default=str)}\n\n"
+            "Сформируй краткую рекомендацию (2-3 предложения):\n"
+            "1. Обоснование risk score\n"
+            "2. Ключевые факторы (позитивные и негативные)\n"
+            "3. Рекомендация по взаимодействию"
+        )
+
+        analysis = await self.think(prompt, max_tokens=300)
+
+        if analysis:
+            report.recommendation = analysis.strip()
 
     def _calculate_risk_score(self, investigator_data: Optional[dict], report: VerifierReport):
         """Calculate the final risk score (0-100)."""

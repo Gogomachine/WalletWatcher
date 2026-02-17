@@ -38,20 +38,47 @@ from .base import (
 logger = logging.getLogger(__name__)
 
 
+OFFICER_SYSTEM_PROMPT = """Ты — Главный Офицер (Chief Officer) системы TxPeek.
+Твоя роль — центральный координатор AML-анализа криптовалютных адресов.
+
+ЗАДАЧИ:
+1. Анализировать отчёты Расследователя (on-chain данные) и Проверятора (compliance)
+2. Сопоставлять данные, находить противоречия
+3. Формировать ЕДИНЫЙ ВЕРДИКТ с обоснованием
+4. При противоречиях — ВСЕГДА выбирать более осторожную оценку
+
+УРОВНИ РИСКА:
+🟢 CLEAN (0-15) — угрозы не обнаружены
+🟡 LOW_RISK (16-35) — незначительные флаги
+🟠 MEDIUM_RISK (36-60) — подозрительные связи
+🔴 HIGH_RISK (61-85) — связи с санкциями/миксерами/скамами
+⛔ CRITICAL (86-100) — адрес в санкционных списках
+
+ПРАВИЛА:
+- False positive лучше false negative
+- Не давать финансовых рекомендаций
+- Открыто признавать ограничения (open-source базы ≠ Chainalysis)
+- Ответ на РУССКОМ языке
+- Быть кратким: 2-4 предложения для обоснования
+- Если данных мало — указать на неполноту анализа"""
+
+
 class OfficerAgent(BaseAgent):
     """Chief Officer - central coordinator of the multi-agent system."""
 
     name = "Officer"
+    system_prompt = OFFICER_SYSTEM_PROMPT
 
-    def __init__(self, archivist=None, investigator=None, verifier=None):
+    def __init__(self, archivist=None, investigator=None, verifier=None, api_key=None):
         """Initialize Officer with subordinate agents.
 
         Args:
             archivist: ArchivistAgent instance
             investigator: InvestigatorAgent instance
             verifier: VerifierAgent instance
+            api_key: Anthropic API key
         """
-        super().__init__()
+        super().__init__(api_key=api_key)
         self.archivist = archivist
         self.investigator = investigator
         self.verifier = verifier
@@ -112,8 +139,8 @@ class OfficerAgent(BaseAgent):
         investigator_report = await self._run_investigator(case)
         verifier_report = await self._run_verifier(case, investigator_report)
 
-        # Step 3: Synthesize verdict
-        verdict = self._synthesize_verdict(case, investigator_report, verifier_report)
+        # Step 3: Synthesize verdict (uses Claude API for reasoning)
+        verdict = await self._synthesize_verdict(case, investigator_report, verifier_report)
 
         # Step 4: Archive results
         await self._archive_results(case, verdict, investigator_report, verifier_report)
@@ -229,7 +256,7 @@ class OfficerAgent(BaseAgent):
             self.logger.error(f"Verifier failed: {e}")
             return None
 
-    def _synthesize_verdict(
+    async def _synthesize_verdict(
         self,
         case: CaseContext,
         investigator_report: Optional[dict],
@@ -238,6 +265,7 @@ class OfficerAgent(BaseAgent):
         """Synthesize final verdict from agent reports.
 
         When reports conflict, ALWAYS choose the more cautious assessment.
+        Uses Claude API for reasoning when available.
         """
         verdict = OfficerVerdict(
             case_id=case.case_id,
@@ -267,12 +295,10 @@ class OfficerAgent(BaseAgent):
             elif inv_status == CheckStatus.SUSPICIOUS:
                 reasons.append("Investigator: suspicious patterns detected")
 
-            # Add pattern details
             patterns = investigator_report.get("detected_patterns", [])
             if patterns:
-                reasons.extend(patterns[:3])  # Top 3 patterns
+                reasons.extend(patterns[:3])
 
-            # Add mixer info
             mixers = investigator_report.get("mixer_interactions", [])
             if mixers:
                 reasons.append(
@@ -283,7 +309,6 @@ class OfficerAgent(BaseAgent):
             verdict.verifier_report = verifier_report
             ver_score = verifier_report.get("risk_score", 0)
 
-            # Add compliance details
             if verifier_report.get("ofac_sdn") == "flagged":
                 reasons.append("OFAC SDN list match")
             if verifier_report.get("usdt_frozen") == "flagged":
@@ -299,22 +324,17 @@ class OfficerAgent(BaseAgent):
                     f"Explorer label: {verifier_report['explorer_label_text']}"
                 )
 
-        # Determine risk score (use Verifier's score as primary, boost if Investigator flags)
+        # Determine risk score
         final_score = ver_score
-
-        # If Investigator found critical/flagged but Verifier didn't catch it, boost
         if inv_status in (CheckStatus.CRITICAL, CheckStatus.FLAGGED) and ver_score < 50:
             final_score = max(final_score, 50)
-
-        # If Investigator found suspicious, ensure at least LOW_RISK
         if inv_status == CheckStatus.SUSPICIOUS and ver_score < 20:
             final_score = max(final_score, 20)
 
-        # SAFETY: when in doubt, choose more cautious assessment
         verdict.risk_score = max(0, min(100, final_score))
         verdict.risk_level = RiskLevel.from_score(verdict.risk_score)
 
-        # Confidence based on data availability
+        # Confidence
         data_points = 0
         if investigator_report:
             data_points += 1
@@ -328,28 +348,47 @@ class OfficerAgent(BaseAgent):
                 data_points += 1
             if verifier_report.get("chainabuse_status") != "n/a":
                 data_points += 1
-
         verdict.confidence = min(95, data_points * 15 + 10)
 
-        # Build reason
-        if reasons:
+        # Use Claude API to generate human-readable verdict reasoning
+        import json
+        llm_prompt = (
+            f"Адрес: {case.address}\n"
+            f"Сеть: {case.network.value}\n"
+            f"Risk Score (рассчитанный): {verdict.risk_score}/100\n"
+            f"Уровень: {verdict.risk_level.label}\n\n"
+            f"Данные Расследователя:\n{json.dumps(investigator_report, ensure_ascii=False, default=str)[:2000] if investigator_report else 'нет данных'}\n\n"
+            f"Данные Проверятора:\n{json.dumps(verifier_report, ensure_ascii=False, default=str)[:2000] if verifier_report else 'нет данных'}\n\n"
+            "Сформируй КРАТКИЙ вердикт (2-4 предложения):\n"
+            "1. Обоснование уровня риска\n"
+            "2. Ключевые факторы\n"
+            "3. Рекомендация\n"
+            "Формат: только текст, без заголовков и маркеров."
+        )
+
+        llm_analysis = await self.think(llm_prompt, max_tokens=400)
+
+        if llm_analysis:
+            # LLM обогащает вердикт человекочитаемым обоснованием
+            verdict.reason = llm_analysis.strip()
+        elif reasons:
             verdict.reason = "; ".join(reasons[:5])
         elif verdict.risk_level == RiskLevel.CLEAN:
-            verdict.reason = "No threats detected in sanctions lists, blacklists, or transaction patterns."
+            verdict.reason = "Угрозы не обнаружены в санкционных списках, блэклистах и транзакционных паттернах."
         else:
-            verdict.reason = "Potential risk indicators detected."
+            verdict.reason = "Обнаружены потенциальные индикаторы риска."
 
-        # Generate recommendation
+        # Generate recommendation (fallback if LLM didn't include it)
         if verdict.risk_level == RiskLevel.CLEAN:
-            verdict.recommendation = "Low risk. No issues found."
+            verdict.recommendation = "Низкий риск. Проблем не обнаружено."
         elif verdict.risk_level == RiskLevel.LOW_RISK:
-            verdict.recommendation = "Minor flags. Monitor recommended."
+            verdict.recommendation = "Незначительные флаги. Рекомендован мониторинг."
         elif verdict.risk_level == RiskLevel.MEDIUM_RISK:
-            verdict.recommendation = "Suspicious connections. Exercise caution."
+            verdict.recommendation = "Подозрительные связи. Требуется осторожность."
         elif verdict.risk_level == RiskLevel.HIGH_RISK:
-            verdict.recommendation = "High risk. Avoid interaction with this address."
+            verdict.recommendation = "Высокий риск. Избегать взаимодействия с этим адресом."
         else:
-            verdict.recommendation = "CRITICAL RISK. Do NOT interact with this address."
+            verdict.recommendation = "КРИТИЧЕСКИЙ РИСК. НЕ взаимодействовать с этим адресом."
 
         verdict.should_archive = True
 
@@ -406,7 +445,7 @@ class OfficerAgent(BaseAgent):
             self.logger.error(f"Officer: archive error: {e}")
 
     async def handle_info_request(self, question: str) -> str:
-        """Handle a general AML information request.
+        """Handle a general AML information request using Claude API.
 
         Args:
             question: User's question about AML
@@ -414,23 +453,33 @@ class OfficerAgent(BaseAgent):
         Returns:
             Answer string
         """
-        # Simple AML education responses
-        lower = question.lower()
+        # Try LLM first for intelligent response
+        llm_answer = await self.think(
+            f"Пользователь спрашивает: {question}\n\n"
+            "Ответь кратко (2-3 абзаца) как AML-эксперт. "
+            "Отвечай на русском. Используй эмодзи умеренно.",
+            max_tokens=500,
+        )
 
+        if llm_answer:
+            return llm_answer
+
+        # Fallback: hardcoded responses
+        lower = question.lower()
         if any(kw in lower for kw in ["risk", "уровн", "скор"]):
             return (
-                "TxPeek uses a risk scoring system:\n\n"
-                "\U0001f7e2 CLEAN (0-15) - No threats found\n"
-                "\U0001f7e1 LOW RISK (16-35) - Minor flags, monitoring recommended\n"
-                "\U0001f7e0 MEDIUM RISK (36-60) - Suspicious connections, exercise caution\n"
-                "\U0001f534 HIGH RISK (61-85) - Sanctions/mixer/scam connections\n"
-                "\u26d4 CRITICAL (86-100) - Direct sanctions match or criminal activity\n\n"
-                "The score is calculated from sanctions lists, blacklists, "
-                "transaction patterns, and counterparty analysis."
+                "TxPeek использует систему скоринга рисков:\n\n"
+                "\U0001f7e2 CLEAN (0-15) — угрозы не обнаружены\n"
+                "\U0001f7e1 LOW RISK (16-35) — незначительные флаги\n"
+                "\U0001f7e0 MEDIUM RISK (36-60) — подозрительные связи\n"
+                "\U0001f534 HIGH RISK (61-85) — связи с санкциями/миксерами\n"
+                "\u26d4 CRITICAL (86-100) — адрес в санкционных списках\n\n"
+                "Скор рассчитывается на основе санкционных списков, блэклистов, "
+                "паттернов транзакций и анализа контрагентов."
             )
 
         return (
-            "TxPeek checks addresses against open sanctions databases, "
-            "blacklists, and analyzes transaction patterns. "
-            "Send me any crypto address for a full AML check."
+            "TxPeek проверяет адреса по открытым санкционным базам, "
+            "блэклистам и анализирует транзакционные паттерны. "
+            "Отправь мне любой криптоадрес для полной AML-проверки."
         )

@@ -26,6 +26,7 @@ Data flow:
 """
 
 import logging
+import os
 from typing import Optional
 
 from .base import (
@@ -56,6 +57,7 @@ class AgentSystem:
         solana_client=None,
         blockchain_client=None,
         screenshot_service=None,
+        api_key: Optional[str] = None,
     ):
         """Initialize the agent system.
 
@@ -64,28 +66,35 @@ class AgentSystem:
             solana_client: SolanaClient instance
             blockchain_client: UniversalBlockchainClient instance
             screenshot_service: OptimizedScreenshotService instance
+            api_key: Anthropic API key for Claude reasoning
         """
+        self._api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+
         # Create agents bottom-up (dependencies first)
-        self.archivist = ArchivistAgent(database=database)
+        self.archivist = ArchivistAgent(database=database, api_key=self._api_key)
 
         self.investigator = InvestigatorAgent(
             solana_client=solana_client,
             evm_client=blockchain_client,
             screenshot_service=screenshot_service,
+            api_key=self._api_key,
         )
 
         self.verifier = VerifierAgent(
             solana_client=solana_client,
+            api_key=self._api_key,
         )
 
         self.officer = OfficerAgent(
             archivist=self.archivist,
             investigator=self.investigator,
             verifier=self.verifier,
+            api_key=self._api_key,
         )
 
         self.press_office = PressOfficeAgent(
             officer=self.officer,
+            api_key=self._api_key,
         )
 
         self._initialized = False

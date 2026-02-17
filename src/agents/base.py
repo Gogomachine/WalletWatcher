@@ -7,12 +7,15 @@ Agents never send messages to Telegram directly (only Press Office).
 Agents never bypass the Officer (exception: Investigator -> Verifier by Officer's order).
 """
 
+import os
 import uuid
 import logging
 from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
+
+from anthropic import AsyncAnthropic
 
 
 logger = logging.getLogger(__name__)
@@ -268,12 +271,58 @@ class OfficerVerdict:
 # ============================================================
 
 class BaseAgent:
-    """Base class for all agents in the TxPeek system."""
+    """Base class for all agents in the TxPeek system.
+
+    Each agent has access to Claude API as its "reasoning brain".
+    The LLM interprets collected data and generates assessments
+    according to the agent's role defined in its system prompt.
+    """
 
     name: str = "BaseAgent"
+    system_prompt: str = ""
+    model: str = "claude-sonnet-4-20250514"
 
-    def __init__(self):
+    def __init__(self, api_key: Optional[str] = None):
         self.logger = logging.getLogger(f"txpeek.{self.name}")
+        self._api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+        self._client: Optional[AsyncAnthropic] = None
+
+    @property
+    def llm(self) -> Optional[AsyncAnthropic]:
+        """Lazy-initialized Anthropic client."""
+        if self._client is None and self._api_key:
+            self._client = AsyncAnthropic(api_key=self._api_key)
+        return self._client
+
+    async def think(self, prompt: str, max_tokens: int = 1024) -> str:
+        """Send a prompt to Claude API and get a response.
+
+        This is the agent's 'brain' — used to reason about collected data.
+
+        Args:
+            prompt: The user-role message describing what to analyze
+            max_tokens: Max response tokens
+
+        Returns:
+            Claude's response text, or empty string on failure
+        """
+        if not self.llm:
+            self.logger.debug(f"{self.name}: no API key, skipping LLM call")
+            return ""
+
+        try:
+            response = await self.llm.messages.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                system=self.system_prompt,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return "\n".join(
+                block.text for block in response.content if block.type == "text"
+            )
+        except Exception as e:
+            self.logger.warning(f"{self.name} LLM error: {e}")
+            return ""
 
     async def process(self, message: AgentMessage) -> AgentMessage:
         """Process an incoming message. Override in subclasses."""

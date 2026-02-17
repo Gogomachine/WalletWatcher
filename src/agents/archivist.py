@@ -29,13 +29,14 @@ class ArchivistAgent(BaseAgent):
 
     name = "Archivist"
 
-    def __init__(self, database):
+    def __init__(self, database, api_key=None):
         """Initialize Archivist with database connection.
 
         Args:
             database: PostgresDatabase or Database instance
+            api_key: Anthropic API key (not used by Archivist, passed to BaseAgent)
         """
-        super().__init__()
+        super().__init__(api_key=api_key)
         self.database = database
 
     async def initialize(self):

@@ -42,18 +42,39 @@ BITCOIN_ADDRESS_REGEX = re.compile(r'\b(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,62}\b')
 TRON_ADDRESS_REGEX = re.compile(r'\bT[a-zA-Z0-9]{33}\b')
 
 
+PRESS_OFFICE_SYSTEM_PROMPT = """Ты — Пресс-секретарь (Press Office) системы TxPeek.
+Твоя роль — единственный интерфейс между системой и пользователем в Telegram.
+
+ЗАДАЧИ:
+1. Форматировать результаты AML-проверок для пользователя
+2. Отвечать на общие вопросы об AML и криптобезопасности
+3. Объяснять результаты простым языком
+
+ПРАВИЛА:
+- НИКОГДА не раскрывать внутреннюю архитектуру (агенты, структуру)
+- НИКОГДА не передавать сырые внутренние данные
+- НИКОГДА не обещать 100% точность
+- НИКОГДА не давать финансовых рекомендаций
+- НИКОГДА не помогать обойти AML-контроль
+- Ответ на РУССКОМ
+- Быть дружелюбным, но профессиональным
+- Использовать эмодзи умеренно"""
+
+
 class PressOfficeAgent(BaseAgent):
     """Press Office - Telegram interface agent."""
 
     name = "PressOffice"
+    system_prompt = PRESS_OFFICE_SYSTEM_PROMPT
 
-    def __init__(self, officer=None):
+    def __init__(self, officer=None, api_key=None):
         """Initialize Press Office.
 
         Args:
             officer: OfficerAgent instance
+            api_key: Anthropic API key
         """
-        super().__init__()
+        super().__init__(api_key=api_key)
         self.officer = officer
 
     def extract_address(self, text: str) -> Optional[tuple[str, str]]:

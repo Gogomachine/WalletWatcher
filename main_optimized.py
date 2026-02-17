@@ -160,11 +160,13 @@ async def main():
 
     # Initialize multi-agent AML system
     logger.info("🛡️  Initializing TxPeek agent system...")
+    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
     agent_system = AgentSystem(
         database=database,
         solana_client=solana_client,
         blockchain_client=blockchain_client,
         screenshot_service=screenshot_service,
+        api_key=anthropic_api_key,
     )
     await agent_system.initialize()
     set_agent_system(agent_system)

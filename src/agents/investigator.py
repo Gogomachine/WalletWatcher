@@ -62,20 +62,44 @@ KNOWN_BRIDGES = {
 }
 
 
+INVESTIGATOR_SYSTEM_PROMPT = """Ты — Расследователь (Investigator) системы TxPeek.
+Твоя роль — on-chain аналитик. Ты получаешь сырые данные о блокчейн-адресе и должен их проанализировать.
+
+ЗАДАЧИ:
+1. Оценить транзакционный профиль адреса
+2. Выявить подозрительные паттерны:
+   - Peel chain (последовательное дробление сумм)
+   - Fan-out / Fan-in (распределение / сбор)
+   - Round number transactions (ровные суммы)
+   - Dormant → внезапная активность
+   - Cross-chain bridging patterns
+3. Идентифицировать контрагентов (биржи, DEX, миксеры, мосты)
+4. Дать предварительную оценку: CLEAN / SUSPICIOUS / FLAGGED / CRITICAL
+
+ПРАВИЛА:
+- Оперировать ФАКТАМИ из данных, не домысливать
+- Если данных мало — указать на неполноту
+- Ответ на РУССКОМ
+- Быть кратким: перечислить найденные паттерны и дать оценку в 3-5 предложений
+- Формат: только текст анализа, без JSON"""
+
+
 class InvestigatorAgent(BaseAgent):
     """Investigator agent - on-chain data collector and analyst."""
 
     name = "Investigator"
+    system_prompt = INVESTIGATOR_SYSTEM_PROMPT
 
-    def __init__(self, solana_client=None, evm_client=None, screenshot_service=None):
+    def __init__(self, solana_client=None, evm_client=None, screenshot_service=None, api_key=None):
         """Initialize Investigator with blockchain clients.
 
         Args:
             solana_client: SolanaClient instance
             evm_client: UniversalBlockchainClient or EVMClient instance
             screenshot_service: OptimizedScreenshotService instance
+            api_key: Anthropic API key
         """
-        super().__init__()
+        super().__init__(api_key=api_key)
         self.solana_client = solana_client
         self.evm_client = evm_client
         self.screenshot_service = screenshot_service
@@ -185,6 +209,9 @@ class InvestigatorAgent(BaseAgent):
         # 5. Analyze patterns and determine preliminary status
         self._analyze_patterns(report)
         self._determine_preliminary_status(report)
+
+        # 6. LLM-анализ собранных данных
+        await self._llm_analyze(report)
 
     async def _fetch_solana_tokens(self, address: str, report: InvestigatorReport):
         """Fetch SPL token balances via Helius API."""
@@ -372,6 +399,48 @@ class InvestigatorAgent(BaseAgent):
 
         self._analyze_patterns(report)
         self._determine_preliminary_status(report)
+
+        # LLM-анализ для EVM
+        await self._llm_analyze(report)
+
+    async def _llm_analyze(self, report: InvestigatorReport):
+        """Use Claude API to analyze collected on-chain data and enrich the report."""
+        import json
+
+        summary_data = {
+            "address": report.address,
+            "network": report.network,
+            "balance": report.balance,
+            "total_transactions": report.total_transactions,
+            "wallet_age_first_tx": report.wallet_age_first_tx,
+            "wallet_age_last_tx": report.wallet_age_last_tx,
+            "cex_interactions": report.cex_interactions,
+            "dex_interactions": report.dex_interactions,
+            "mixer_interactions": report.mixer_interactions,
+            "bridge_interactions": report.bridge_interactions,
+            "unknown_large_counterparties": report.unknown_large_counterparties,
+            "detected_patterns": report.detected_patterns,
+            "tokens_count": len(report.tokens),
+            "nft_count": report.nft_count,
+            "preliminary_status": report.preliminary_status.value,
+        }
+
+        prompt = (
+            f"Проанализируй данные кошелька:\n\n"
+            f"{json.dumps(summary_data, ensure_ascii=False, default=str)}\n\n"
+            "Задачи:\n"
+            "1. Оцени транзакционный профиль\n"
+            "2. Выяви подозрительные паттерны (peel chain, fan-out/in, dormant→active)\n"
+            "3. Оцени контрагентов\n"
+            "4. Дай предварительную оценку в 3-5 предложений\n"
+            "Если данных мало — укажи это."
+        )
+
+        analysis = await self.think(prompt, max_tokens=500)
+
+        if analysis:
+            # Добавляем LLM-анализ в комментарий
+            report.comment = f"{report.comment}\n\nLLM-анализ: {analysis.strip()}"
 
     def _analyze_patterns(self, report: InvestigatorReport):
         """Analyze transaction patterns for suspicious behavior."""
