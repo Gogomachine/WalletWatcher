@@ -66,8 +66,8 @@ OFFICER_SYSTEM_PROMPT = """Ты — Главный Офицер (Chief Officer) 
 class OfficerAgent(BaseAgent):
     """Chief Officer - central coordinator of the multi-agent system.
 
-    Способен к самообучению: после каждого вердикта рефлексирует,
-    получает фидбек от пользователей, и эволюционирует через LearningEngine.
+    Способен к автономному самообучению: после каждого вердикта рефлексирует,
+    анализирует прошлые кейсы и эволюционирует через LearningEngine.
     Динамический промпт обогащается выученными правилами.
     """
 
@@ -137,7 +137,7 @@ class OfficerAgent(BaseAgent):
             f"on {net.value} (case {case.case_id})"
         )
 
-        # Step 0: Consult memory — найти похожие кейсы с фидбеком
+        # Step 0: Consult memory — найти похожие кейсы из архива
         similar_cases = []
         if self.learning_engine:
             similar_cases = await self.learning_engine.find_similar_cases(
@@ -167,6 +167,7 @@ class OfficerAgent(BaseAgent):
             reflection = await self.learning_engine.self_reflect(
                 case_id=case.case_id,
                 address=case.address,
+                network=case.network.value,
                 risk_score=verdict.risk_score,
                 risk_level=verdict.risk_level.label,
                 reason=verdict.reason,
@@ -399,11 +400,18 @@ class OfficerAgent(BaseAgent):
         if similar_cases:
             memory_lines = []
             for sc in similar_cases[:3]:
-                memory_lines.append(
-                    f"- Ранее этот адрес проверяли: score={sc.get('prev_score')}, "
-                    f"фидбек={sc.get('feedback')}"
-                    + (f", комментарий: {sc.get('comment')}" if sc.get('comment') else "")
-                )
+                if sc.get("type") == "past_reflection":
+                    memory_lines.append(
+                        f"- Прошлая проверка: score={sc.get('prev_score')}, "
+                        f"уровень={sc.get('prev_level')}, "
+                        f"рефлексия: {sc.get('reflection', '')[:150]}"
+                    )
+                else:
+                    memory_lines.append(
+                        f"- Прошлый вердикт: score={sc.get('prev_score')}, "
+                        f"уровень={sc.get('prev_level')}, "
+                        f"причина: {sc.get('prev_reason', '')[:150]}"
+                    )
             memory_context = (
                 "\n\nПАМЯТЬ (предыдущие проверки этого адреса):\n"
                 + "\n".join(memory_lines)

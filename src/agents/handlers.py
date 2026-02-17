@@ -139,90 +139,12 @@ async def callback_aml_detail(callback: CallbackQuery):
 
 
 # ============================================================
-# Feedback handlers — самообучение Офицера
-# ============================================================
-
-@aml_check_router.callback_query(F.data.startswith("fb_"))
-async def callback_feedback(callback: CallbackQuery):
-    """Handle feedback buttons for Officer self-learning."""
-    await callback.answer()
-
-    data = callback.data  # fb_correct_CASE-XXXXX, fb_incorrect_..., fb_too_high_..., fb_too_low_...
-
-    # Parse feedback type and case_id
-    parts = data.split("_", 2)
-    if len(parts) < 3:
-        return
-
-    feedback_type = parts[1]  # correct, incorrect, too_high, too_low
-    # Handle two-word types: too_high, too_low
-    if feedback_type == "too":
-        sub_parts = data.split("_", 3)
-        if len(sub_parts) < 4:
-            return
-        feedback_type = f"{sub_parts[1]}_{sub_parts[2]}"  # too_high or too_low
-        case_id = sub_parts[3]
-    else:
-        case_id = parts[2]
-
-    verdict = _verdict_cache.get(case_id)
-    if not verdict:
-        await callback.message.answer(
-            "\u26a0\ufe0f Результат устарел. Запустите проверку заново.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    system = get_agent_system()
-    if not system or not system.learning_engine:
-        await callback.message.answer(
-            "\u26a0\ufe0f Система обучения недоступна.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    user_id = callback.from_user.id
-
-    await system.learning_engine.record_feedback(
-        case_id=case_id,
-        user_id=user_id,
-        address=verdict.address,
-        network=verdict.network,
-        risk_score=verdict.risk_score,
-        risk_level=verdict.risk_level.label,
-        reason=verdict.reason,
-        feedback_type=feedback_type,
-    )
-
-    feedback_labels = {
-        "correct": "\u2705 Спасибо! Отмечено как верный вердикт.",
-        "incorrect": "\u274c Спасибо! Отмечено как неверный. Офицер учтёт.",
-        "too_high": "\u2b06\ufe0f Спасибо! Отмечено как завышенный риск.",
-        "too_low": "\u2b07\ufe0f Спасибо! Отмечено как заниженный риск.",
-    }
-
-    response_text = feedback_labels.get(
-        feedback_type, "\u2705 Фидбек принят."
-    )
-
-    # Показать статистику обучения
-    stats = await system.learning_engine.get_stats()
-    response_text += (
-        f"\n\n<i>\U0001f9e0 Поколение #{stats['generation']} | "
-        f"Точность: {stats['accuracy']} | "
-        f"Правил: {stats['active_rules']}</i>"
-    )
-
-    await callback.message.answer(response_text, parse_mode=ParseMode.HTML)
-
-
-# ============================================================
-# /brain command — статистика обучения
+# /brain command — статистика самообучения Офицера
 # ============================================================
 
 @aml_check_router.message(Command("brain"))
 async def cmd_brain(message: Message):
-    """Show Officer learning statistics and evolved rules."""
+    """Show Officer self-learning statistics and evolved rules."""
     system = get_agent_system()
     if not system or not system.learning_engine:
         await message.reply(
@@ -237,9 +159,8 @@ async def cmd_brain(message: Message):
     text = (
         "\U0001f9e0 <b>TxPeek — Мозг Офицера</b>\n\n"
         f"<b>Поколение:</b> #{stats['generation']}\n"
-        f"<b>Точность:</b> {stats['accuracy']}\n"
-        f"<b>Всего фидбеков:</b> {stats['total_feedback']}\n"
-        f"<b>Из них верных:</b> {stats['correct_feedback']}\n"
+        f"<b>Всего кейсов:</b> {stats['total_cases']}\n"
+        f"<b>Рефлексий:</b> {stats['total_reflections']}\n"
         f"<b>Активных правил:</b> {stats['active_rules']}\n"
         f"<b>До следующей эволюции:</b> {stats['next_evolution_in']} кейсов\n"
     )
@@ -254,13 +175,14 @@ async def cmd_brain(message: Message):
             )
     else:
         text += (
-            "\n<i>Правил пока нет. Оставляйте фидбек после проверок, "
-            "и Офицер начнёт учиться!</i>"
+            "\n<i>Правил пока нет. Офицер учится автономно — "
+            "с каждым кейсом он рефлексирует и эволюционирует.</i>"
         )
 
     text += (
-        "\n\n<i>\U0001f4a1 Оставляйте фидбек кнопками под результатами "
-        "проверок — это помогает Офицеру эволюционировать.</i>"
+        "\n\n<i>\U0001f4a1 Офицер учится на собственных кейсах: "
+        "после каждого вердикта — саморефлексия, "
+        f"каждые {stats.get('evolution_threshold', 10)} кейсов — эволюция правил.</i>"
     )
 
     await message.reply(text, parse_mode=ParseMode.HTML)

@@ -1,19 +1,21 @@
-"""Officer Learning Engine — самообучение и эволюция.
+"""Officer Learning Engine — автономное самообучение и эволюция.
 
-Система позволяет Офицеру:
-1. Запоминать свои решения и рефлексировать над ними
-2. Получать фидбек от пользователей (верно/неверно/завышено/занижено)
-3. Периодически эволюционировать — синтезировать новые правила из опыта
-4. Подстраивать динамический промпт на основе выученных паттернов
-5. Калибровать уверенность на основе точности
+Офицер учится БЕЗ фидбека пользователей. Система полностью автономна:
+1. После каждого вердикта — саморефлексия (LLM критически оценивает решение)
+2. Рефлексии сохраняются в БД для анализа
+3. При поиске похожих кейсов — обращение к архиву (aml_archive)
+4. Каждые N кейсов — эволюция: LLM анализирует накопленные кейсы и
+   рефлексии, синтезирует новые правила, деактивирует устаревшие
+5. Динамический промпт: базовый + выученные правила
 
 Цикл обучения:
-    VERDICT → SELF_REFLECTION → USER_FEEDBACK → ACCUMULATE →
+    VERDICT → SELF_REFLECTION → ACCUMULATE →
     (every N cases) → EVOLUTION → UPDATED_RULES → better VERDICT
 """
 
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 from dataclasses import dataclass, field
@@ -28,56 +30,24 @@ MAX_LEARNED_RULES = 15
 
 
 @dataclass
-class FeedbackRecord:
-    """Запись фидбека пользователя по вердикту."""
-    case_id: str = ""
-    user_id: int = 0
-    address: str = ""
-    network: str = ""
-    # Вердикт Офицера
-    officer_risk_score: int = 0
-    officer_risk_level: str = ""
-    officer_reason: str = ""
-    # Фидбек пользователя: correct, incorrect, too_high, too_low
-    feedback_type: str = ""
-    feedback_comment: str = ""
-    created_at: str = ""
-
-
-@dataclass
 class LearnedPattern:
     """Выученный паттерн/правило."""
     pattern_id: str = ""
-    rule_text: str = ""          # Текст правила на русском
-    source: str = ""             # "evolution" | "feedback" | "self_reflection"
-    confidence: float = 0.5      # 0.0–1.0, растёт при подтверждении
-    times_applied: int = 0       # Сколько раз правило было применено
-    times_confirmed: int = 0     # Сколько раз подтверждено фидбеком
+    rule_text: str = ""
+    source: str = ""             # "evolution" | "self_reflection"
+    confidence: float = 0.5      # 0.0–1.0
+    times_applied: int = 0
+    times_confirmed: int = 0
     created_at: str = ""
     last_used_at: str = ""
     active: bool = True
 
 
-@dataclass
-class EvolutionRecord:
-    """Запись об эволюционном цикле."""
-    evolution_id: str = ""
-    generation: int = 0          # Номер поколения
-    cases_analyzed: int = 0
-    feedback_used: int = 0
-    new_rules: list = field(default_factory=list)
-    deprecated_rules: list = field(default_factory=list)
-    accuracy_before: float = 0.0
-    accuracy_after: float = 0.0
-    evolution_summary: str = ""
-    created_at: str = ""
-
-
 class LearningEngine:
-    """Движок самообучения Офицера.
+    """Движок автономного самообучения Офицера.
 
-    Хранит память, обрабатывает фидбек, запускает эволюцию,
-    формирует динамический промпт.
+    Учится на собственных кейсах и рефлексиях. Никакого
+    фидбека от пользователей — полная автономия.
     """
 
     def __init__(self, database=None, api_key: Optional[str] = None):
@@ -85,13 +55,12 @@ class LearningEngine:
         self._api_key = api_key
         self.logger = logging.getLogger("txpeek.learning")
 
-        # In-memory кэш (подгружается из БД при initialize)
+        # In-memory кэш
         self._learned_rules: list[LearnedPattern] = []
         self._generation: int = 0
         self._cases_since_evolution: int = 0
         self._total_cases: int = 0
-        self._correct_count: int = 0
-        self._total_feedback: int = 0
+        self._total_reflections: int = 0
 
         # LLM клиент (lazy)
         self._client = None
@@ -105,13 +74,6 @@ class LearningEngine:
             if key:
                 self._client = AsyncAnthropic(api_key=key)
         return self._client
-
-    @property
-    def accuracy(self) -> float:
-        """Текущая точность (по фидбеку)."""
-        if self._total_feedback == 0:
-            return 0.0
-        return self._correct_count / self._total_feedback
 
     @property
     def generation(self) -> int:
@@ -129,19 +91,17 @@ class LearningEngine:
             return
 
         async with pool.acquire() as conn:
-            # Таблица фидбека
+            # Таблица рефлексий Офицера
             await conn.execute("""
-                CREATE TABLE IF NOT EXISTS officer_feedback (
+                CREATE TABLE IF NOT EXISTS officer_reflections (
                     id SERIAL PRIMARY KEY,
                     case_id TEXT NOT NULL,
-                    user_id BIGINT NOT NULL,
                     address TEXT NOT NULL,
                     network TEXT DEFAULT '',
-                    officer_risk_score INTEGER DEFAULT 0,
-                    officer_risk_level TEXT DEFAULT '',
-                    officer_reason TEXT DEFAULT '',
-                    feedback_type TEXT NOT NULL,
-                    feedback_comment TEXT DEFAULT '',
+                    risk_score INTEGER DEFAULT 0,
+                    risk_level TEXT DEFAULT '',
+                    reason TEXT DEFAULT '',
+                    reflection TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -169,11 +129,9 @@ class LearningEngine:
                     evolution_id TEXT UNIQUE NOT NULL,
                     generation INTEGER DEFAULT 0,
                     cases_analyzed INTEGER DEFAULT 0,
-                    feedback_used INTEGER DEFAULT 0,
+                    reflections_analyzed INTEGER DEFAULT 0,
                     new_rules JSONB DEFAULT '[]',
                     deprecated_rules JSONB DEFAULT '[]',
-                    accuracy_before REAL DEFAULT 0.0,
-                    accuracy_after REAL DEFAULT 0.0,
                     evolution_summary TEXT DEFAULT '',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -181,20 +139,23 @@ class LearningEngine:
 
             # Индексы
             await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_feedback_case ON officer_feedback(case_id)
+                CREATE INDEX IF NOT EXISTS idx_reflections_case
+                ON officer_reflections(case_id)
             """)
             await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_feedback_address ON officer_feedback(address)
+                CREATE INDEX IF NOT EXISTS idx_reflections_address
+                ON officer_reflections(address)
             """)
             await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_patterns_active ON officer_learned_patterns(active)
+                CREATE INDEX IF NOT EXISTS idx_patterns_active
+                ON officer_learned_patterns(active)
             """)
 
         # Загрузить состояние
         await self._load_state()
         self.logger.info(
-            f"LearningEngine initialized: generation={self._generation}, "
-            f"rules={len(self._learned_rules)}, accuracy={self.accuracy:.1%}"
+            f"LearningEngine initialized: gen={self._generation}, "
+            f"rules={len(self._learned_rules)}, cases={self._total_cases}"
         )
 
     async def _load_state(self):
@@ -231,20 +192,20 @@ class LearningEngine:
 
             # Загрузить поколение
             gen_row = await conn.fetchrow("""
-                SELECT COALESCE(MAX(generation), 0) AS gen FROM officer_evolution_log
+                SELECT COALESCE(MAX(generation), 0) AS gen
+                FROM officer_evolution_log
             """)
             self._generation = gen_row["gen"] if gen_row else 0
 
-            # Статистика фидбека
-            stats = await conn.fetchrow("""
-                SELECT
-                    COUNT(*) AS total,
-                    COUNT(*) FILTER (WHERE feedback_type = 'correct') AS correct
-                FROM officer_feedback
-            """)
-            if stats:
-                self._total_feedback = stats["total"]
-                self._correct_count = stats["correct"]
+            # Общее количество кейсов
+            self._total_cases = await conn.fetchval(
+                "SELECT COUNT(*) FROM aml_archive"
+            ) or 0
+
+            # Рефлексии
+            self._total_reflections = await conn.fetchval(
+                "SELECT COUNT(*) FROM officer_reflections"
+            ) or 0
 
             # Кейсы с последней эволюции
             last_evo = await conn.fetchrow("""
@@ -258,20 +219,14 @@ class LearningEngine:
                 """, last_evo["created_at"])
                 self._cases_since_evolution = cases_since or 0
             else:
-                total_cases = await conn.fetchval(
-                    "SELECT COUNT(*) FROM aml_archive"
-                )
-                self._cases_since_evolution = total_cases or 0
+                self._cases_since_evolution = self._total_cases
 
     # ============================================================
     # Динамический промпт
     # ============================================================
 
     def get_evolved_prompt_supplement(self) -> str:
-        """Сформировать дополнение к системному промпту из выученных правил.
-
-        Возвращает блок текста, который добавляется к базовому system prompt Офицера.
-        """
+        """Сформировать дополнение к системному промпту из выученных правил."""
         if not self._learned_rules:
             return ""
 
@@ -279,7 +234,6 @@ class LearningEngine:
         if not active_rules:
             return ""
 
-        # Сортируем по уверенности
         active_rules.sort(key=lambda r: r.confidence, reverse=True)
 
         rules_text = "\n".join(
@@ -289,7 +243,7 @@ class LearningEngine:
 
         return (
             f"\n\nВЫУЧЕННЫЕ ПРАВИЛА (поколение #{self._generation}, "
-            f"точность: {self.accuracy:.0%}):\n"
+            f"кейсов обработано: {self._total_cases}):\n"
             f"{rules_text}\n\n"
             "Применяй эти правила наряду с базовыми. "
             "Если правило противоречит фактам — игнорируй его."
@@ -303,6 +257,7 @@ class LearningEngine:
         self,
         case_id: str,
         address: str,
+        network: str,
         risk_score: int,
         risk_level: str,
         reason: str,
@@ -316,14 +271,20 @@ class LearningEngine:
         - Что можно улучшить?
         - Какие новые паттерны замечены?
 
+        Результат сохраняется в БД для дальнейшей эволюции.
+
         Returns:
             Текст рефлексии или None
         """
         if not self.llm:
             return None
 
-        inv_summary = json.dumps(investigator_data, ensure_ascii=False, default=str)[:1500] if investigator_data else "нет"
-        ver_summary = json.dumps(verifier_data, ensure_ascii=False, default=str)[:1500] if verifier_data else "нет"
+        inv_summary = json.dumps(
+            investigator_data, ensure_ascii=False, default=str
+        )[:1500] if investigator_data else "нет"
+        ver_summary = json.dumps(
+            verifier_data, ensure_ascii=False, default=str
+        )[:1500] if verifier_data else "нет"
 
         prompt = (
             f"Ты только что вынес вердикт по адресу {address[:12]}...\n"
@@ -339,7 +300,6 @@ class LearningEngine:
         )
 
         try:
-            from anthropic import AsyncAnthropic
             response = await self.llm.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=300,
@@ -352,78 +312,53 @@ class LearningEngine:
             )
             reflection = "\n".join(
                 b.text for b in response.content if b.type == "text"
+            ).strip()
+
+            # Сохранить рефлексию в БД
+            await self._save_reflection(
+                case_id, address, network, risk_score, risk_level, reason, reflection
             )
+
             self.logger.info(f"Self-reflection for {case_id}: {reflection[:100]}...")
-            return reflection.strip()
+            return reflection
+
         except Exception as e:
             self.logger.warning(f"Self-reflection failed: {e}")
             return None
 
-    # ============================================================
-    # Обработка фидбека
-    # ============================================================
-
-    async def record_feedback(
-        self,
-        case_id: str,
-        user_id: int,
-        address: str,
-        network: str,
-        risk_score: int,
-        risk_level: str,
-        reason: str,
-        feedback_type: str,
-        feedback_comment: str = "",
+    async def _save_reflection(
+        self, case_id: str, address: str, network: str,
+        risk_score: int, risk_level: str, reason: str, reflection: str,
     ):
-        """Записать фидбек пользователя и обновить статистику.
-
-        Args:
-            feedback_type: 'correct' | 'incorrect' | 'too_high' | 'too_low'
-        """
+        """Сохранить рефлексию в БД."""
         pool = getattr(self.database, 'pool', None)
         if pool is None:
-            self.logger.warning("No pool — feedback не сохранён")
             return
 
         async with pool.acquire() as conn:
             await conn.execute("""
-                INSERT INTO officer_feedback (
-                    case_id, user_id, address, network,
-                    officer_risk_score, officer_risk_level, officer_reason,
-                    feedback_type, feedback_comment
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            """,
-                case_id, user_id, address, network,
-                risk_score, risk_level, reason,
-                feedback_type, feedback_comment,
-            )
+                INSERT INTO officer_reflections
+                    (case_id, address, network, risk_score, risk_level, reason, reflection)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+            """, case_id, address, network, risk_score, risk_level, reason, reflection)
 
-        # Обновить in-memory статистику
-        self._total_feedback += 1
-        if feedback_type == "correct":
-            self._correct_count += 1
-
+        self._total_reflections += 1
         self._cases_since_evolution += 1
-
-        self.logger.info(
-            f"Feedback recorded: {case_id} = {feedback_type} "
-            f"(accuracy now: {self.accuracy:.1%})"
-        )
 
         # Проверить, нужна ли эволюция
         if self._cases_since_evolution >= EVOLUTION_THRESHOLD:
             await self.evolve()
 
     # ============================================================
-    # Поиск похожих кейсов
+    # Поиск похожих кейсов (из архива)
     # ============================================================
 
     async def find_similar_cases(self, address: str, network: str) -> list[dict]:
-        """Найти похожие кейсы с фидбеком для обогащения анализа.
+        """Найти похожие кейсы из архива для обогащения анализа.
 
         Ищет:
         1. Тот же адрес (повторная проверка)
-        2. Тот же тип сети с похожим фидбеком
+        2. Рефлексии по этому адресу
 
         Returns:
             Список релевантных записей
@@ -434,25 +369,42 @@ class LearningEngine:
 
         results = []
         async with pool.acquire() as conn:
-            # Тот же адрес
-            rows = await conn.fetch("""
-                SELECT f.case_id, f.feedback_type, f.feedback_comment,
-                       f.officer_risk_score, f.officer_risk_level,
-                       f.created_at
-                FROM officer_feedback f
-                WHERE f.address = $1
-                ORDER BY f.created_at DESC
+            # Предыдущие вердикты по тому же адресу
+            archive_rows = await conn.fetch("""
+                SELECT case_id, risk_level, risk_score, verdict_reason,
+                       created_at
+                FROM aml_archive
+                WHERE address = $1
+                ORDER BY created_at DESC
                 LIMIT 5
             """, address)
 
-            for row in rows:
+            for row in archive_rows:
                 results.append({
                     "case_id": row["case_id"],
-                    "type": "same_address",
-                    "feedback": row["feedback_type"],
-                    "comment": row["feedback_comment"],
-                    "prev_score": row["officer_risk_score"],
-                    "prev_level": row["officer_risk_level"],
+                    "type": "previous_verdict",
+                    "prev_score": row["risk_score"],
+                    "prev_level": row["risk_level"],
+                    "prev_reason": (row["verdict_reason"] or "")[:200],
+                    "date": str(row["created_at"]),
+                })
+
+            # Рефлексии по этому адресу
+            reflection_rows = await conn.fetch("""
+                SELECT case_id, risk_score, risk_level, reflection
+                FROM officer_reflections
+                WHERE address = $1
+                ORDER BY created_at DESC
+                LIMIT 3
+            """, address)
+
+            for row in reflection_rows:
+                results.append({
+                    "case_id": row["case_id"],
+                    "type": "past_reflection",
+                    "prev_score": row["risk_score"],
+                    "prev_level": row["risk_level"],
+                    "reflection": (row["reflection"] or "")[:300],
                 })
 
         return results
@@ -464,8 +416,8 @@ class LearningEngine:
     async def evolve(self):
         """Запустить цикл эволюции.
 
-        LLM анализирует накопленный фидбек и синтезирует новые правила.
-        Старые неэффективные правила деактивируются.
+        LLM анализирует накопленные кейсы и рефлексии,
+        синтезирует новые правила, деактивирует устаревшие.
         """
         pool = getattr(self.database, 'pool', None)
         if pool is None or not self.llm:
@@ -476,9 +428,6 @@ class LearningEngine:
             f"Starting evolution cycle (gen {self._generation} → {self._generation + 1})"
         )
 
-        accuracy_before = self.accuracy
-
-        # Собрать фидбек с последней эволюции
         async with pool.acquire() as conn:
             # Последняя эволюция
             last_evo = await conn.fetchrow("""
@@ -486,41 +435,64 @@ class LearningEngine:
                 ORDER BY created_at DESC LIMIT 1
             """)
 
+            # Собрать кейсы из архива
             if last_evo:
-                feedback_rows = await conn.fetch("""
-                    SELECT case_id, address, network,
-                           officer_risk_score, officer_risk_level, officer_reason,
-                           feedback_type, feedback_comment
-                    FROM officer_feedback
+                case_rows = await conn.fetch("""
+                    SELECT address, network, risk_level, risk_score,
+                           verdict_reason
+                    FROM aml_archive
                     WHERE created_at > $1
                     ORDER BY created_at DESC
-                    LIMIT 50
+                    LIMIT 30
+                """, last_evo["created_at"])
+
+                reflection_rows = await conn.fetch("""
+                    SELECT address, risk_score, risk_level,
+                           reason, reflection
+                    FROM officer_reflections
+                    WHERE created_at > $1
+                    ORDER BY created_at DESC
+                    LIMIT 30
                 """, last_evo["created_at"])
             else:
-                feedback_rows = await conn.fetch("""
-                    SELECT case_id, address, network,
-                           officer_risk_score, officer_risk_level, officer_reason,
-                           feedback_type, feedback_comment
-                    FROM officer_feedback
+                case_rows = await conn.fetch("""
+                    SELECT address, network, risk_level, risk_score,
+                           verdict_reason
+                    FROM aml_archive
                     ORDER BY created_at DESC
-                    LIMIT 50
+                    LIMIT 30
                 """)
 
-        if not feedback_rows:
-            self.logger.info("Evolution skipped: no new feedback")
+                reflection_rows = await conn.fetch("""
+                    SELECT address, risk_score, risk_level,
+                           reason, reflection
+                    FROM officer_reflections
+                    ORDER BY created_at DESC
+                    LIMIT 30
+                """)
+
+        if not case_rows and not reflection_rows:
+            self.logger.info("Evolution skipped: no new data")
             return
 
         # Подготовить данные для LLM
-        feedback_data = []
-        for row in feedback_rows:
-            feedback_data.append({
+        cases_data = []
+        for row in case_rows:
+            cases_data.append({
                 "address": row["address"][:12] + "...",
                 "network": row["network"],
-                "score": row["officer_risk_score"],
-                "level": row["officer_risk_level"],
-                "reason": row["officer_reason"][:200],
-                "feedback": row["feedback_type"],
-                "comment": row["feedback_comment"],
+                "score": row["risk_score"],
+                "level": row["risk_level"],
+                "reason": (row["verdict_reason"] or "")[:200],
+            })
+
+        reflections_data = []
+        for row in reflection_rows:
+            reflections_data.append({
+                "address": row["address"][:12] + "...",
+                "score": row["risk_score"],
+                "level": row["risk_level"],
+                "reflection": (row["reflection"] or "")[:300],
             })
 
         current_rules = [
@@ -530,13 +502,17 @@ class LearningEngine:
 
         evolution_prompt = (
             f"Ты — система эволюции AML-аналитика TxPeek. Поколение: #{self._generation}\n"
-            f"Текущая точность: {accuracy_before:.1%}\n\n"
+            f"Кейсов обработано: {self._total_cases}\n\n"
             f"ТЕКУЩИЕ ПРАВИЛА:\n{json.dumps(current_rules, ensure_ascii=False)}\n\n"
-            f"ФИДБЕК ПО ПОСЛЕДНИМ КЕЙСАМ:\n{json.dumps(feedback_data, ensure_ascii=False)}\n\n"
-            "ЗАДАЧА — на основе фидбека:\n"
+            f"ПОСЛЕДНИЕ КЕЙСЫ ({len(cases_data)}):\n"
+            f"{json.dumps(cases_data, ensure_ascii=False)}\n\n"
+            f"САМОРЕФЛЕКСИИ ({len(reflections_data)}):\n"
+            f"{json.dumps(reflections_data, ensure_ascii=False)}\n\n"
+            "ЗАДАЧА — на основе кейсов и рефлексий:\n"
             "1. Какие НОВЫЕ правила стоит добавить? (макс 3)\n"
+            "   Ищи повторяющиеся паттерны, слабые места, закономерности\n"
             "2. Какие текущие правила УСТАРЕЛИ и их стоит убрать?\n"
-            "3. Краткое резюме: что улучшить в следующем поколении?\n\n"
+            "3. Краткое резюме: что Офицер научился делать лучше?\n\n"
             "Ответ СТРОГО в формате JSON:\n"
             "{\n"
             '  "new_rules": ["правило 1", "правило 2"],\n'
@@ -551,7 +527,8 @@ class LearningEngine:
                 model="claude-sonnet-4-20250514",
                 max_tokens=800,
                 system=(
-                    "Ты — система метаобучения AML. Анализируй фидбек и "
+                    "Ты — система метаобучения AML-аналитика. "
+                    "Анализируй кейсы и саморефлексии, "
                     "синтезируй улучшенные правила. Отвечай ТОЛЬКО JSON."
                 ),
                 messages=[{"role": "user", "content": evolution_prompt}],
@@ -561,7 +538,7 @@ class LearningEngine:
                 b.text for b in response.content if b.type == "text"
             ).strip()
 
-            # Извлечь JSON (LLM может обернуть в ```json```)
+            # Извлечь JSON
             if "```" in raw_text:
                 raw_text = raw_text.split("```")[1]
                 if raw_text.startswith("json"):
@@ -580,9 +557,7 @@ class LearningEngine:
         # Применить эволюцию
         new_generation = self._generation + 1
         now = datetime.now(timezone.utc)
-        import uuid
 
-        # Добавить новые правила
         added_ids = []
         async with pool.acquire() as conn:
             for rule_text in new_rules:
@@ -625,16 +600,15 @@ class LearningEngine:
             evo_id = f"EVO-{new_generation}-{uuid.uuid4().hex[:6].upper()}"
             await conn.execute("""
                 INSERT INTO officer_evolution_log
-                    (evolution_id, generation, cases_analyzed, feedback_used,
-                     new_rules, deprecated_rules,
-                     accuracy_before, accuracy_after, evolution_summary, created_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    (evolution_id, generation, cases_analyzed,
+                     reflections_analyzed, new_rules, deprecated_rules,
+                     evolution_summary, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             """,
-                evo_id, new_generation, self._cases_since_evolution,
-                len(feedback_rows),
+                evo_id, new_generation, len(case_rows),
+                len(reflection_rows),
                 json.dumps(new_rules, ensure_ascii=False),
                 json.dumps(deprecate, ensure_ascii=False),
-                accuracy_before, accuracy_before,  # after будет обновлён позже
                 summary, now,
             )
 
@@ -661,11 +635,11 @@ class LearningEngine:
         stats = {
             "generation": self._generation,
             "active_rules": len([r for r in self._learned_rules if r.active]),
-            "total_feedback": self._total_feedback,
-            "correct_feedback": self._correct_count,
-            "accuracy": f"{self.accuracy:.1%}",
+            "total_cases": self._total_cases,
+            "total_reflections": self._total_reflections,
             "cases_since_evolution": self._cases_since_evolution,
             "next_evolution_in": max(0, EVOLUTION_THRESHOLD - self._cases_since_evolution),
+            "evolution_threshold": EVOLUTION_THRESHOLD,
         }
 
         if pool:
@@ -682,14 +656,13 @@ class LearningEngine:
         return stats
 
     async def get_learned_rules_display(self) -> list[dict]:
-        """Получить правила для отображения пользователю."""
+        """Получить правила для отображения."""
         return [
             {
                 "rule": r.rule_text,
                 "confidence": f"{r.confidence:.0%}",
                 "source": r.source,
                 "applied": r.times_applied,
-                "confirmed": r.times_confirmed,
             }
             for r in self._learned_rules
             if r.active

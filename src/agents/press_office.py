@@ -270,27 +270,6 @@ class PressOfficeAgent(BaseAgent):
                     callback_data=f"aml_screenshot_{verdict.case_id}",
                 ),
             ])
-        # Feedback buttons — для самообучения Офицера
-        buttons.append([
-            InlineKeyboardButton(
-                text="\u2705 Верно",
-                callback_data=f"fb_correct_{verdict.case_id}",
-            ),
-            InlineKeyboardButton(
-                text="\u274c Неверно",
-                callback_data=f"fb_incorrect_{verdict.case_id}",
-            ),
-        ])
-        buttons.append([
-            InlineKeyboardButton(
-                text="\u2b06\ufe0f Завышено",
-                callback_data=f"fb_too_high_{verdict.case_id}",
-            ),
-            InlineKeyboardButton(
-                text="\u2b07\ufe0f Занижено",
-                callback_data=f"fb_too_low_{verdict.case_id}",
-            ),
-        ])
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
