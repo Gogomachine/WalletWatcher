@@ -64,12 +64,18 @@ OFFICER_SYSTEM_PROMPT = """Ты — Главный Офицер (Chief Officer) 
 
 
 class OfficerAgent(BaseAgent):
-    """Chief Officer - central coordinator of the multi-agent system."""
+    """Chief Officer - central coordinator of the multi-agent system.
+
+    Способен к автономному самообучению: после каждого вердикта рефлексирует,
+    анализирует прошлые кейсы и эволюционирует через LearningEngine.
+    Динамический промпт обогащается выученными правилами.
+    """
 
     name = "Officer"
     system_prompt = OFFICER_SYSTEM_PROMPT
 
-    def __init__(self, archivist=None, investigator=None, verifier=None, api_key=None):
+    def __init__(self, archivist=None, investigator=None, verifier=None,
+                 api_key=None, learning_engine=None):
         """Initialize Officer with subordinate agents.
 
         Args:
@@ -77,11 +83,13 @@ class OfficerAgent(BaseAgent):
             investigator: InvestigatorAgent instance
             verifier: VerifierAgent instance
             api_key: Anthropic API key
+            learning_engine: LearningEngine instance for self-learning
         """
         super().__init__(api_key=api_key)
         self.archivist = archivist
         self.investigator = investigator
         self.verifier = verifier
+        self.learning_engine = learning_engine
 
     async def handle_address_check(self, user_id: int, address: str, network: str = None) -> OfficerVerdict:
         """Handle an address check request from Press Office.
@@ -129,6 +137,13 @@ class OfficerAgent(BaseAgent):
             f"on {net.value} (case {case.case_id})"
         )
 
+        # Step 0: Consult memory — найти похожие кейсы из архива
+        similar_cases = []
+        if self.learning_engine:
+            similar_cases = await self.learning_engine.find_similar_cases(
+                address, net.value
+            )
+
         # Step 1: Query Archivist for cached results
         cached = await self._query_archivist(case)
         if cached:
@@ -139,11 +154,28 @@ class OfficerAgent(BaseAgent):
         investigator_report = await self._run_investigator(case)
         verifier_report = await self._run_verifier(case, investigator_report)
 
-        # Step 3: Synthesize verdict (uses Claude API for reasoning)
-        verdict = await self._synthesize_verdict(case, investigator_report, verifier_report)
+        # Step 3: Synthesize verdict (uses Claude API + learned rules)
+        verdict = await self._synthesize_verdict(
+            case, investigator_report, verifier_report, similar_cases
+        )
 
         # Step 4: Archive results
         await self._archive_results(case, verdict, investigator_report, verifier_report)
+
+        # Step 5: Self-reflection — рефлексия над решением
+        if self.learning_engine:
+            reflection = await self.learning_engine.self_reflect(
+                case_id=case.case_id,
+                address=case.address,
+                network=case.network.value,
+                risk_score=verdict.risk_score,
+                risk_level=verdict.risk_level.label,
+                reason=verdict.reason,
+                investigator_data=investigator_report,
+                verifier_data=verifier_report,
+            )
+            if reflection:
+                verdict.self_reflection = reflection
 
         return verdict
 
@@ -256,16 +288,26 @@ class OfficerAgent(BaseAgent):
             self.logger.error(f"Verifier failed: {e}")
             return None
 
+    def _get_effective_system_prompt(self) -> str:
+        """Получить эффективный системный промпт с выученными правилами."""
+        base = self.system_prompt
+        if self.learning_engine:
+            supplement = self.learning_engine.get_evolved_prompt_supplement()
+            if supplement:
+                return base + supplement
+        return base
+
     async def _synthesize_verdict(
         self,
         case: CaseContext,
         investigator_report: Optional[dict],
         verifier_report: Optional[dict],
+        similar_cases: Optional[list] = None,
     ) -> OfficerVerdict:
         """Synthesize final verdict from agent reports.
 
         When reports conflict, ALWAYS choose the more cautious assessment.
-        Uses Claude API for reasoning when available.
+        Uses Claude API + learned rules for reasoning.
         """
         verdict = OfficerVerdict(
             case_id=case.case_id,
@@ -352,13 +394,38 @@ class OfficerAgent(BaseAgent):
 
         # Use Claude API to generate human-readable verdict reasoning
         import json
+
+        # Собрать контекст из памяти (похожие кейсы)
+        memory_context = ""
+        if similar_cases:
+            memory_lines = []
+            for sc in similar_cases[:3]:
+                if sc.get("type") == "past_reflection":
+                    memory_lines.append(
+                        f"- Прошлая проверка: score={sc.get('prev_score')}, "
+                        f"уровень={sc.get('prev_level')}, "
+                        f"рефлексия: {sc.get('reflection', '')[:150]}"
+                    )
+                else:
+                    memory_lines.append(
+                        f"- Прошлый вердикт: score={sc.get('prev_score')}, "
+                        f"уровень={sc.get('prev_level')}, "
+                        f"причина: {sc.get('prev_reason', '')[:150]}"
+                    )
+            memory_context = (
+                "\n\nПАМЯТЬ (предыдущие проверки этого адреса):\n"
+                + "\n".join(memory_lines)
+                + "\nУчти этот опыт при формировании вердикта."
+            )
+
         llm_prompt = (
             f"Адрес: {case.address}\n"
             f"Сеть: {case.network.value}\n"
             f"Risk Score (рассчитанный): {verdict.risk_score}/100\n"
             f"Уровень: {verdict.risk_level.label}\n\n"
             f"Данные Расследователя:\n{json.dumps(investigator_report, ensure_ascii=False, default=str)[:2000] if investigator_report else 'нет данных'}\n\n"
-            f"Данные Проверятора:\n{json.dumps(verifier_report, ensure_ascii=False, default=str)[:2000] if verifier_report else 'нет данных'}\n\n"
+            f"Данные Проверятора:\n{json.dumps(verifier_report, ensure_ascii=False, default=str)[:2000] if verifier_report else 'нет данных'}"
+            f"{memory_context}\n\n"
             "Сформируй КРАТКИЙ вердикт (2-4 предложения):\n"
             "1. Обоснование уровня риска\n"
             "2. Ключевые факторы\n"
@@ -366,7 +433,23 @@ class OfficerAgent(BaseAgent):
             "Формат: только текст, без заголовков и маркеров."
         )
 
-        llm_analysis = await self.think(llm_prompt, max_tokens=400)
+        # Используем эволюционированный промпт
+        effective_prompt = self._get_effective_system_prompt()
+        llm_analysis = ""
+        if self.llm:
+            try:
+                response = await self.llm.messages.create(
+                    model=self.model,
+                    max_tokens=400,
+                    system=effective_prompt,
+                    messages=[{"role": "user", "content": llm_prompt}],
+                )
+                llm_analysis = "\n".join(
+                    b.text for b in response.content if b.type == "text"
+                )
+            except Exception as e:
+                self.logger.warning(f"Officer LLM error: {e}")
+                llm_analysis = ""
 
         if llm_analysis:
             # LLM обогащает вердикт человекочитаемым обоснованием

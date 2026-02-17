@@ -138,6 +138,56 @@ async def callback_aml_detail(callback: CallbackQuery):
     await system.press_office.send_detailed_report(bot, chat_id, verdict)
 
 
+# ============================================================
+# /brain command — статистика самообучения Офицера
+# ============================================================
+
+@aml_check_router.message(Command("brain"))
+async def cmd_brain(message: Message):
+    """Show Officer self-learning statistics and evolved rules."""
+    system = get_agent_system()
+    if not system or not system.learning_engine:
+        await message.reply(
+            "\u26a0\ufe0f Система обучения не инициализирована.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    stats = await system.learning_engine.get_stats()
+    rules = await system.learning_engine.get_learned_rules_display()
+
+    text = (
+        "\U0001f9e0 <b>TxPeek — Мозг Офицера</b>\n\n"
+        f"<b>Поколение:</b> #{stats['generation']}\n"
+        f"<b>Всего кейсов:</b> {stats['total_cases']}\n"
+        f"<b>Рефлексий:</b> {stats['total_reflections']}\n"
+        f"<b>Активных правил:</b> {stats['active_rules']}\n"
+        f"<b>До следующей эволюции:</b> {stats['next_evolution_in']} кейсов\n"
+    )
+
+    if rules:
+        text += "\n<b>Выученные правила:</b>\n"
+        for i, rule in enumerate(rules[:10], 1):
+            text += (
+                f"\n{i}. {rule['rule']}\n"
+                f"   <i>Уверенность: {rule['confidence']} | "
+                f"Источник: {rule['source']}</i>\n"
+            )
+    else:
+        text += (
+            "\n<i>Правил пока нет. Офицер учится автономно — "
+            "с каждым кейсом он рефлексирует и эволюционирует.</i>"
+        )
+
+    text += (
+        "\n\n<i>\U0001f4a1 Офицер учится на собственных кейсах: "
+        "после каждого вердикта — саморефлексия, "
+        f"каждые {stats.get('evolution_threshold', 10)} кейсов — эволюция правил.</i>"
+    )
+
+    await message.reply(text, parse_mode=ParseMode.HTML)
+
+
 @aml_check_router.callback_query(F.data.startswith("aml_screenshot_"))
 async def callback_aml_screenshot(callback: CallbackQuery):
     """Send the screenshot from AML check."""

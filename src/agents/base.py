@@ -265,6 +265,9 @@ class OfficerVerdict:
     investigator_report: Optional[dict] = None
     verifier_report: Optional[dict] = None
 
+    # Self-learning
+    self_reflection: Optional[str] = None
+
 
 # ============================================================
 # Base Agent

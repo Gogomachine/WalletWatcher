@@ -40,6 +40,7 @@ from .investigator import InvestigatorAgent
 from .verifier import VerifierAgent
 from .officer import OfficerAgent
 from .press_office import PressOfficeAgent
+from .learning import LearningEngine
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,12 @@ class AgentSystem:
         """
         self._api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
 
+        # Learning engine for Officer self-training
+        self.learning_engine = LearningEngine(
+            database=database,
+            api_key=self._api_key,
+        )
+
         # Create agents bottom-up (dependencies first)
         self.archivist = ArchivistAgent(database=database, api_key=self._api_key)
 
@@ -90,6 +97,7 @@ class AgentSystem:
             investigator=self.investigator,
             verifier=self.verifier,
             api_key=self._api_key,
+            learning_engine=self.learning_engine,
         )
 
         self.press_office = PressOfficeAgent(
@@ -106,8 +114,11 @@ class AgentSystem:
 
         try:
             await self.archivist.initialize()
+            await self.learning_engine.initialize()
             self._initialized = True
-            logger.info("Agent system initialized successfully")
+            logger.info(
+                f"Agent system initialized (learning: gen #{self.learning_engine.generation})"
+            )
         except Exception as e:
             logger.error(f"Agent system initialization failed: {e}")
             # Don't raise - allow system to function without archive
@@ -142,6 +153,7 @@ __all__ = [
     "VerifierAgent",
     "OfficerAgent",
     "PressOfficeAgent",
+    "LearningEngine",
     "RiskLevel",
     "NetworkType",
     "RequestType",
